@@ -6,9 +6,15 @@
 
 系统把「阻力」拆成五类可观测的证据——盘口挂单堆积、墙与冰山（含撤单/回补）、
 逐笔主动买卖流、清算带、以及盘口真空——加权成一个方向分数，并给出 15 分钟后的
-目标位与失效位。前端是零依赖的深色终端，后端是纯 Python asyncio 服务。
+目标位与失效位。前端是零依赖的交易所风格终端（K 线、订单簿梯、成交 tape、
+预测 rail），后端是纯 Python asyncio 服务。
 
-![终端预览](screenshots/final-desktop.png)
+![终端预览](screenshots/exchange-desktop.png)
+
+> 在线仓库：<https://github.com/kfat77/least-resistance>
+> 其他截图：[移动端](screenshots/exchange-mobile.png) ·
+> [900px 布局](screenshots/exchange-900.png) ·
+> [离线 mock 预览](screenshots/exchange-mock.png)
 
 ## 快速开始
 
@@ -97,8 +103,8 @@ python -m pytest tests -q
 
 覆盖订单簿重建与重同步、回补检测、墙/冰山/清算分析、预测结算、hub 快照、
 模拟器盘口不交叉、HTTP/WS 接口、撤单判定与现货成交镜像，共 40 项。前端视觉
-验收使用 Playwright 截图到 `screenshots/final-desktop.png` 与
-`screenshots/final-mobile.png`；`?mock=1` 离线预览见 `screenshots/final-mock-desktop.png`。
+验收使用 Playwright 截图到 `screenshots/exchange-desktop.png` 与
+`screenshots/exchange-mobile.png`；`?mock=1` 离线预览见 `screenshots/exchange-mock.png`。
 
 ## 免责声明
 

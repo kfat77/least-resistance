@@ -1,213 +1,410 @@
 <!doctype html>
 <html lang="zh-CN">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="color-scheme" content="dark" />
-<meta name="theme-color" content="#05070b" />
-<title>MIN·RESISTANCE / 最小阻力 · 实时行情终端</title>
-<meta name="description" content="BTC / ETH 永续合约实时微观结构终端：订单簿阻力剖面、摩擦曲线、清算地图、主动流与 15 分钟最小阻力方向预测。" />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2305070b'/%3E%3Cpath d='M8 23h16' stroke='%235c6a7e' stroke-width='1.4'/%3E%3Cpath d='M16 27V7' stroke='%233ef0b2' stroke-width='2'/%3E%3Cpath d='M10 13l6-6 6 6' fill='none' stroke='%233ef0b2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
-<link rel="stylesheet" href="./css/base.css" />
-<link rel="stylesheet" href="./css/panels.css" />
-<script type="module" src="./js/app.js"></script>
-</head>
-<body class="is-booting">
-<div class="bg-fx" aria-hidden="true"></div>
-<a class="skip-link" href="#main">跳到主内容</a>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0e11" />
+    <meta
+      name="description"
+      content="MIN·RESISTANCE / 最小阻力 — BTC & ETH 永续合约实时分析终端。价格沿阻力最小的方向移动：订单簿、清算热力、主动流与五信号合成为方向判断。"
+    />
+    <title>MIN·RESISTANCE / 最小阻力 · 永续合约终端</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0e11'/%3E%3Cpath d='M9 22 L16 9 L23 22' fill='none' stroke='%23f0b90b' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M16 17 L16 26' stroke='%230ecb81' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="./css/base.css" />
+    <link rel="stylesheet" href="./css/panels.css" />
+  </head>
+  <body class="is-booting">
+    <a class="skip-link" href="#main">跳到主内容</a>
+    <div class="bg-fx" aria-hidden="true"></div>
 
-<header class="topbar">
-  <div class="topbar-inner">
-    <div class="brand">
-      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-        <circle cx="16" cy="16" r="13" fill="none" stroke="rgba(143,163,190,.22)" />
-        <path d="M9.5 23.5h13" stroke="rgba(143,163,190,.5)" stroke-width="1.2" />
-        <path d="M16 26V6.5" stroke="#3ef0b2" stroke-width="2" stroke-linecap="round" />
-        <path d="M10.5 12.5 16 7l5.5 5.5" fill="none" stroke="#3ef0b2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
-      <div class="brand-text">
-        <span class="brand-name">MIN<span class="brand-dot">·</span>RESISTANCE</span>
-        <span class="brand-sub">最小阻力 · 永续终端</span>
+    <header class="top">
+      <div class="top-inner">
+        <a class="brand" href="./" aria-label="MIN RESISTANCE 首页">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 28 28" width="26" height="26">
+              <path d="M6 21 L14 5 L22 21" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M14 16 L14 25" fill="none" stroke="var(--up)" stroke-width="2.4" stroke-linecap="round" />
+            </svg>
+          </span>
+          <span class="brand-txt">
+            <b>MIN·RESISTANCE</b>
+            <i>最小阻力 · 永续终端</i>
+          </span>
+        </a>
+
+        <nav class="nav" aria-label="终端分区">
+          <button type="button" class="nav-btn is-on" data-view="terminal">交易终端</button>
+          <button type="button" class="nav-btn" data-view="depth">深度结构</button>
+          <button type="button" class="nav-btn" data-view="ledger">预测账本</button>
+          <button type="button" class="nav-btn" data-view="events">事件流</button>
+        </nav>
+
+        <div class="pair-tabs" role="tablist" aria-label="合约选择">
+          <button type="button" class="pair-tab is-on" role="tab" aria-selected="true" data-sym="BTCUSDT">BTCUSDT</button>
+          <button type="button" class="pair-tab" role="tab" aria-selected="false" data-sym="ETHUSDT">ETHUSDT</button>
+        </div>
+
+        <div class="top-status">
+          <span class="status-chip" id="conn-chip" data-state="boot">
+            <span class="dot" aria-hidden="true"></span>
+            <b id="conn-label">连接中</b>
+          </span>
+          <span class="tb-meta"><i>FEED</i><b id="feed-source">—</b></span>
+          <span class="tb-meta"><i>LATENCY</i><b id="latency">—</b></span>
+          <span class="tb-meta tb-meta--age"><i>DATA</i><b id="data-age">—</b></span>
+          <span class="clock" id="clock-time">--:--:--<i>UTC+8</i></span>
+        </div>
+      </div>
+    </header>
+
+    <div class="ticker" id="ticker" aria-label="合约行情条">
+      <div class="ticker-sym">
+        <span class="ts-icon" id="tk-icon">₿</span>
+        <span class="ts-name" id="tk-sym">BTCUSDT</span>
+        <span class="ts-perp">PERP</span>
+      </div>
+      <div class="ticker-price">
+        <b class="num" id="tk-price">—</b>
+        <span class="chg num" id="tk-chg">—</span>
+        <span class="chg-abs num" id="tk-chg-abs">—</span>
+      </div>
+      <div class="ticker-grid">
+        <div class="tk"><i>24H HIGH</i><b class="num" id="tk-high">—</b></div>
+        <div class="tk"><i>24H LOW</i><b class="num" id="tk-low">—</b></div>
+        <div class="tk"><i>24H VOL</i><b class="num" id="tk-vol">—</b></div>
+        <div class="tk"><i>FUNDING / 下次</i><b class="num" id="tk-funding">—</b></div>
+        <div class="tk"><i>OPEN INTEREST</i><b class="num" id="tk-oi">—</b></div>
+        <div class="tk"><i>MARK / INDEX</i><b class="num" id="tk-mark">—</b></div>
+        <div class="tk"><i>SPREAD / 失衡</i><b class="num" id="tk-spread">—</b></div>
       </div>
     </div>
 
-    <div class="topbar-status">
-      <span class="status-chip" id="conn-chip" data-state="boot">
-        <i class="status-dot"></i><span id="conn-label">连接中</span>
-      </span>
-      <span class="tb-meta">
-        <span class="micro">FEED</span><b id="feed-source">—</b>
-      </span>
-      <span class="tb-meta">
-        <span class="micro">LATENCY</span><b id="latency">—</b>
-      </span>
-      <span class="tb-meta tb-meta--age">
-        <span class="micro">DATA</span><b id="data-age">—</b>
-      </span>
-    </div>
-
-    <div class="clock" aria-label="UTC+8 时钟">
-      <span class="clock-time" id="clock-time">--:--:--</span>
-      <span class="clock-label micro">UTC+8</span>
-    </div>
-  </div>
-</header>
-
-<main id="main">
-  <section class="hero" aria-labelledby="hero-title">
-    <div class="hero-head">
-      <div class="hero-title-wrap">
-        <span class="sec-index">00</span>
-        <h1 id="hero-title">市场概览<span class="micro">MARKET OVERVIEW</span></h1>
-      </div>
-      <div class="hero-meta" id="hero-meta">
-        <span>等待数据链路…</span>
-      </div>
-    </div>
-    <div class="hero-grid" id="hero-grid">
-      <div class="boot-card">
+    <main id="main" class="work">
+      <div class="boot-card" id="boot-card">
         <span class="boot-ring" aria-hidden="true"></span>
         <p>建立数据链路 · CONNECTING</p>
-        <span class="micro">Binance USDⓈ-M PERPETUAL · WS / 900ms</span>
+        <em>BINANCE USDⓈ-M PERPETUAL · WS / 900MS</em>
       </div>
-    </div>
-  </section>
 
-  <nav class="jump" aria-label="分析面板导航">
-    <a href="#depth"><span class="n">01</span>阻力剖面</a>
-    <a href="#friction"><span class="n">02</span>摩擦曲线</a>
-    <a href="#liqmap"><span class="n">03</span>清算地图</a>
-    <a href="#ladder"><span class="n">04</span>订单簿梯</a>
-    <a href="#flow"><span class="n">05</span>主动流</a>
-    <a href="#signals"><span class="n">06</span>信号拆解</a>
-    <a href="#accuracy"><span class="n">07</span>预测准确率</a>
-    <a href="#events"><span class="n">08</span>事件流</a>
-  </nav>
+      <div class="work-grid" id="work-grid" hidden>
+        <aside class="col-left" aria-label="市场与阻力概览">
+          <section class="card market-card">
+            <div class="card-head">
+              <h2>市场 <em>MARKETS</em></h2>
+              <span class="card-tag">2</span>
+            </div>
+            <div id="market-list" class="market-list"></div>
+          </section>
 
-  <section class="section" id="depth" aria-labelledby="depth-title">
-    <header class="sec-head">
-      <div class="sec-title-wrap">
-        <span class="sec-index">01</span>
-        <h2 id="depth-title">阻力剖面<span class="micro">DEPTH PROFILE</span></h2>
+          <section class="card resist-card">
+            <div class="card-head">
+              <h2>阻力平衡 <em>RESISTANCE</em></h2>
+              <span class="card-tag is-on" id="bias-tag">—</span>
+            </div>
+            <div class="resist-body">
+              <div class="resist-row">
+                <span>买盘深度</span>
+                <b class="num up" id="rs-bid">—</b>
+              </div>
+              <div class="resist-row">
+                <span>卖盘深度</span>
+                <b class="num down" id="rs-ask">—</b>
+              </div>
+              <div class="bias-bar" aria-hidden="true">
+                <span class="bias-b" id="rs-bar-b"></span>
+                <span class="bias-a" id="rs-bar-a"></span>
+                <i class="bias-mid"></i>
+              </div>
+              <div class="resist-verdict" id="rs-verdict">等待盘口…</div>
+              <div class="needle-wrap">
+                <svg viewBox="0 0 200 96" class="needle" aria-hidden="true">
+                  <path d="M14 84 A86 86 0 0 1 186 84" fill="none" stroke="var(--line-2)" stroke-width="10" stroke-linecap="round" />
+                  <path id="rs-needle-arc" d="M14 84 A86 86 0 0 1 186 84" fill="none" stroke="var(--up)" stroke-width="10" stroke-linecap="round" stroke-dasharray="0 999" />
+                  <g id="rs-needle" class="rs-needle">
+                    <line x1="100" y1="84" x2="100" y2="30" stroke="var(--amber)" stroke-width="2" stroke-linecap="round" />
+                    <circle cx="100" cy="84" r="4" fill="var(--amber)" />
+                  </g>
+                  <text x="24" y="94" class="np-lbl">下行</text>
+                  <text x="100" y="94" class="np-lbl" text-anchor="middle">均衡</text>
+                  <text x="176" y="94" class="np-lbl" text-anchor="end">上行</text>
+                </svg>
+              </div>
+            </div>
+          </section>
+
+          <section class="card liq-card">
+            <div class="card-head">
+              <h2>强平 · 24H <em>LIQUIDATIONS</em></h2>
+              <span class="card-tag warn">估算</span>
+            </div>
+            <div class="liq-body">
+              <div class="liq-big"><b class="num" id="lq-count">0</b><span>笔实际强平</span></div>
+              <div class="liq-split">
+                <div><i>多头</i><b class="num down" id="lq-long">$0</b></div>
+                <div><i>空头</i><b class="num up" id="lq-short">$0</b></div>
+              </div>
+              <p class="hint">实际强平来自交易所 forceOrder；下方「清算地图」为模型估算，两者严格区分。</p>
+            </div>
+          </section>
+
+          <section class="card key-card" aria-label="关键位">
+            <div class="card-head">
+              <h2>关键位 <em>KEY LEVELS</em></h2>
+              <span class="card-tag" id="key-tag">±3%</span>
+            </div>
+            <div class="key-body" id="key-list" role="list"></div>
+            <p class="key-note">依据：挂单墙 + 清算带</p>
+          </section>
+        </aside>
+
+        <section class="col-center" aria-label="K 线与方向">
+          <div class="card chart-card">
+            <div class="chart-head">
+              <div class="ch-id">
+                <b id="ch-sym">BTCUSDT</b>
+                <span>USDⓈ-M PERP</span>
+                <em class="ch-ready" id="ch-ready">BOOK SYNC</em>
+              </div>
+              <div class="ch-price">
+                <b class="num" id="ch-price">—</b>
+                <span class="num" id="ch-chg">—</span>
+              </div>
+              <div class="ch-tools">
+                <div class="seg" role="group" aria-label="K 线周期">
+                  <button type="button" class="seg-btn is-on" data-period="1m">1m</button>
+                  <button type="button" class="seg-btn" data-period="15m">15m</button>
+                </div>
+                <div class="seg seg-ol" role="group" aria-label="图表叠加">
+                  <button type="button" class="seg-btn is-on" data-ol="walls" title="墙 / 冰山标记">墙</button>
+                  <button type="button" class="seg-btn is-on" data-ol="liqs" title="模型清算簇">清算</button>
+                  <button type="button" class="seg-btn" data-ol="ma" title="均线 MA7 / MA25">MA</button>
+                </div>
+              </div>
+            </div>
+            <div class="candle-box" id="candle-host">
+              <canvas></canvas>
+              <div class="chart-tip" id="candle-tip"></div>
+            </div>
+            <div class="chart-foot">
+              <span class="cf-legend"><i class="dot-up"></i>涨 <i class="dot-down"></i>跌</span>
+              <span class="cf-legend"><i class="line-amber"></i>当前价 / 点击价位</span>
+              <span class="cf-legend"><i class="line-cyan"></i>冰山 <i class="line-amber2"></i>墙</span>
+              <span class="cf-legend cf-ma" data-ma="7" hidden><i class="line-amber"></i>MA7</span>
+              <span class="cf-legend cf-ma" data-ma="25" hidden><i class="line-cyan"></i>MA25</span>
+              <span class="cf-tip">悬停查看 OHLC · 点击订单簿价位联动</span>
+              <span class="cf-ohlc num" id="ch-ohlc">—</span>
+            </div>
+          </div>
+        </section>
+
+        <aside class="col-right" aria-label="订单簿与成交流">
+          <section class="card book-card">
+            <div class="card-head book-head">
+              <h2>订单簿 <em>ORDER BOOK</em></h2>
+              <span class="card-tag" id="book-spread">—</span>
+            </div>
+            <div class="book-imbalance" aria-hidden="true">
+              <span class="bi-b" id="book-bi-b"></span>
+              <span class="bi-a" id="book-bi-a"></span>
+              <i class="bi-mid"></i>
+            </div>
+            <div class="book-cols" aria-hidden="true">
+              <span>价格 <i>PRICE</i></span>
+              <span>数量 <i>QTY</i></span>
+              <span>累计 <i>CUM</i></span>
+            </div>
+            <div class="book-body" id="book-body" role="list"></div>
+            <div class="book-foot">
+              <span>买/卖 <b class="num" id="book-ratio">—</b></span>
+              <span>冰山 <b class="num" id="book-ice">—</b></span>
+              <span>墙体 <b class="num" id="book-wall">—</b></span>
+            </div>
+          </section>
+
+          <section class="card tape-card">
+            <div class="card-head tape-head">
+              <h2>成交 / 事件 <em>FLOW</em></h2>
+              <div class="seg seg-tape" role="group" aria-label="切换成大单或事件">
+                <button type="button" class="seg-btn is-on" data-tape="large">大单</button>
+                <button type="button" class="seg-btn" data-tape="events">事件</button>
+              </div>
+            </div>
+            <div class="tape-list" id="tape-list"></div>
+          </section>
+        </aside>
+
+        <section class="card pred-rail" id="pred-rail" aria-label="最小阻力方向与预测">
+          <div class="pred-dir">
+            <span class="micro">LEAST RESISTANCE · 最小阻力</span>
+            <div class="pd-main">
+              <span class="pd-pill" id="pd-pill">中性 <em>NO EDGE</em></span>
+              <span class="pd-conf">CONF <b class="num" id="pd-conf">—</b></span>
+            </div>
+            <div class="pd-bar"><span id="pd-bar"></span></div>
+          </div>
+          <div class="pred-cell">
+            <i>P(UP) · 上涨概率</i>
+            <b class="num" id="pd-pup">—</b>
+            <span class="pd-sub" id="pd-edge">—</span>
+          </div>
+          <div class="pred-cell">
+            <i>目标价 · TARGET</i>
+            <b class="num" id="pd-target">—</b>
+            <span class="pd-sub" id="pd-target-dist">—</span>
+          </div>
+          <div class="pred-cell">
+            <i>失效价 · INVALIDATION</i>
+            <b class="num" id="pd-inval">—</b>
+            <span class="pd-sub" id="pd-inval-dist">—</span>
+          </div>
+          <div class="pred-cell">
+            <i>视界 · 结算 / 命中</i>
+            <b class="num" id="pd-horizon">15m</b>
+            <span class="pd-sub" id="pd-acc">—</span>
+          </div>
+          <div class="sig-mini" id="sig-mini" aria-label="五信号拆解"></div>
+        </section>
+
+        <section class="lower" id="lower" aria-label="结构分析">
+          <div class="lower-head">
+            <div class="lower-tabs" role="tablist" aria-label="结构分析面板">
+              <button type="button" class="ltab is-on" role="tab" aria-selected="true" data-panel="depth">深度剖面</button>
+              <button type="button" class="ltab" role="tab" aria-selected="false" data-panel="friction">摩擦曲线</button>
+              <button type="button" class="ltab" role="tab" aria-selected="false" data-panel="liqmap">清算地图</button>
+              <button type="button" class="ltab" role="tab" aria-selected="false" data-panel="cvd">主动流 CVD</button>
+              <button type="button" class="ltab" role="tab" aria-selected="false" data-panel="events">事件流</button>
+              <button type="button" class="ltab" role="tab" aria-selected="false" data-panel="accuracy">预测账本</button>
+            </div>
+            <span class="lower-meta" id="lower-meta">BTCUSDT · 深度剖面</span>
+          </div>
+
+          <div class="lower-panels">
+            <div class="lpanel" id="lp-depth" data-panel="depth">
+              <div class="lpanel-main">
+                <div class="chart-box h-210" id="depth-host">
+                  <canvas></canvas>
+                  <div class="chart-tip"></div>
+                </div>
+              </div>
+              <div class="lpanel-side kpi-stack" id="depth-kpis"></div>
+            </div>
+
+            <div class="lpanel" id="lp-friction" data-panel="friction" hidden>
+              <div class="lpanel-main">
+                <div class="chart-box h-210" id="friction-host">
+                  <canvas></canvas>
+                  <div class="chart-tip"></div>
+                </div>
+              </div>
+              <div class="lpanel-side kpi-stack" id="friction-kpis"></div>
+            </div>
+
+            <div class="lpanel" id="lp-liqmap" data-panel="liqmap" hidden>
+              <div class="lpanel-main">
+                <div class="chart-box h-210" id="liqmap-host">
+                  <canvas></canvas>
+                  <div class="chart-tip"></div>
+                </div>
+              </div>
+              <div class="lpanel-side kpi-stack" id="liqmap-kpis"></div>
+            </div>
+
+            <div class="lpanel" id="lp-cvd" data-panel="cvd" hidden>
+              <div class="lpanel-main">
+                <div class="chart-box h-210" id="cvd-host">
+                  <canvas></canvas>
+                  <div class="chart-tip"></div>
+                </div>
+              </div>
+              <div class="lpanel-side kpi-stack" id="cvd-kpis"></div>
+            </div>
+
+            <div class="lpanel" id="lp-events" data-panel="events" hidden>
+              <div class="ev-head">
+                <div class="ev-filters" id="ev-filters" role="group" aria-label="事件类型过滤">
+                  <button type="button" class="ev-filter is-active" data-kind="all">全部 <em>0</em></button>
+                  <button type="button" class="ev-filter" data-kind="iceberg">冰山 <em>0</em></button>
+                  <button type="button" class="ev-filter" data-kind="spoof">撤单 <em>0</em></button>
+                  <button type="button" class="ev-filter" data-kind="whale">大单 <em>0</em></button>
+                  <button type="button" class="ev-filter" data-kind="liquidation">强平 <em>0</em></button>
+                </div>
+                <div class="ev-meta" id="ev-meta">—</div>
+              </div>
+              <div class="ev-list" id="ev-list"></div>
+            </div>
+
+            <div class="lpanel" id="lp-accuracy" data-panel="accuracy" hidden>
+              <div class="acc-grid">
+                <div class="acc-ring-wrap">
+                  <svg viewBox="0 0 120 120" class="acc-ring" aria-hidden="true">
+                    <circle cx="60" cy="60" r="49" fill="none" stroke="var(--line-2)" stroke-width="9" />
+                    <circle id="acc-ring-val" cx="60" cy="60" r="49" fill="none" stroke="var(--up)" stroke-width="9" stroke-linecap="round" transform="rotate(-90 60 60)" stroke-dasharray="307.876" stroke-dashoffset="307.876" />
+                  </svg>
+                  <div class="acc-ring-core">
+                    <b class="num" id="acc-rate">—</b>
+                    <i>HIT RATE</i>
+                  </div>
+                </div>
+                <div class="acc-stats" id="acc-stats"></div>
+                <div class="acc-hist-wrap">
+                  <div class="lp-title">最近预测 <em>RECENT</em><span>结果</span></div>
+                  <div class="acc-hist" id="acc-hist"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
-      <p class="sec-meta">挂单深度 × 清算热力 · 共享价格轴 · 左买右卖 · ±3%</p>
-    </header>
-    <div class="pair" id="depth-pair"></div>
-  </section>
+    </main>
 
-  <section class="section" id="friction" aria-labelledby="friction-title">
-    <header class="sec-head">
-      <div class="sec-title-wrap">
-        <span class="sec-index">02</span>
-        <h2 id="friction-title">摩擦曲线<span class="micro">FRICTION CURVE</span></h2>
-      </div>
-      <p class="sec-meta">累计吃单美元 vs 距离 · 曲线交叉处即两种方向的代价平衡点</p>
-    </header>
-    <div class="pair" id="friction-pair"></div>
-  </section>
-
-  <section class="section" id="liqmap" aria-labelledby="liqmap-title">
-    <header class="sec-head">
-      <div class="sec-title-wrap">
-        <span class="sec-index">03</span>
-        <h2 id="liqmap-title">清算地图<span class="micro">LIQUIDATION MAP</span></h2>
-      </div>
-      <p class="sec-meta">模型估算热力 · ±6% · 与交易所真实强平严格区分</p>
-    </header>
-    <div class="pair" id="liqmap-pair"></div>
-  </section>
-
-  <section class="section" id="ladder" aria-labelledby="ladder-title">
-    <header class="sec-head">
-      <div class="sec-title-wrap">
-        <span class="sec-index">04</span>
-        <h2 id="ladder-title">订单簿梯<span class="micro">ORDER BOOK LADDER</span></h2>
-      </div>
-      <p class="sec-meta">盘口 28 档 · 累计深度 · 墙体高亮 · 冰山 / 撤单标记</p>
-    </header>
-    <div class="pair" id="ladder-pair"></div>
-  </section>
-
-  <section class="section" id="flow" aria-labelledby="flow-title">
-    <header class="sec-head">
-      <div class="sec-title-wrap">
-        <span class="sec-index">05</span>
-        <h2 id="flow-title">主动流<span class="micro">AGGRESSOR FLOW</span></h2>
-      </div>
-      <p class="sec-meta">5 分钟窗口 · CVD 累计成交差 · 买卖比 · 大单 tape</p>
-    </header>
-    <div class="pair" id="flow-pair"></div>
-  </section>
-
-  <section class="section" id="signals" aria-labelledby="signals-title">
-    <header class="sec-head">
-      <div class="sec-title-wrap">
-        <span class="sec-index">06</span>
-        <h2 id="signals-title">信号拆解<span class="micro">SIGNAL BREAKDOWN</span></h2>
-      </div>
-      <p class="sec-meta">5 分量加权求和 · 解释最终方向得分 · score ∈ [−1, 1]</p>
-    </header>
-    <div class="pair" id="signals-pair"></div>
-  </section>
-
-  <section class="section" id="accuracy" aria-labelledby="accuracy-title">
-    <header class="sec-head">
-      <div class="sec-title-wrap">
-        <span class="sec-index">07</span>
-        <h2 id="accuracy-title">预测准确率<span class="micro">PREDICTION ACCURACY</span></h2>
-      </div>
-      <p class="sec-meta">15 分钟窗口 · 结算命中率 · Brier 分数 · 最近预测记录</p>
-    </header>
-    <div class="pair" id="accuracy-pair"></div>
-  </section>
-
-  <section class="section" id="events" aria-labelledby="events-title">
-    <header class="sec-head">
-      <div class="sec-title-wrap">
-        <span class="sec-index">08</span>
-        <h2 id="events-title">事件流<span class="micro">EVENT TAPE</span></h2>
-      </div>
-      <p class="sec-meta">冰山回补 · 撤单诱骗 · 大额成交 · 真实强平 · 旧 → 新追加</p>
-    </header>
-    <div class="panel event-panel" id="event-panel">
-      <div class="ev-head">
-        <div class="ev-filters" id="ev-filters" role="group" aria-label="事件类型筛选">
-          <button class="ev-filter is-active" type="button" data-kind="all">全部 <em>0</em></button>
-          <button class="ev-filter" type="button" data-kind="iceberg">冰山 <em>0</em></button>
-          <button class="ev-filter" type="button" data-kind="spoof">撤单 <em>0</em></button>
-          <button class="ev-filter" type="button" data-kind="whale">大单 <em>0</em></button>
-          <button class="ev-filter" type="button" data-kind="liquidation">强平 <em>0</em></button>
+    <footer class="foot">
+      <details class="foot-details">
+        <summary>方法论 / 数据源 / 免责声明 <em>METHODOLOGY &amp; DISCLAIMER</em></summary>
+        <div class="foot-body">
+          <div>
+            <h3>方法 <em>METHOD</em></h3>
+            <p>
+              综合分 = 盘口失衡 × 30% + 墙体阻力 × 24% + 清算燃料 × 22% + 主动成交流 × 14% + 流动性真空 × 10%。
+              score 为正表示上行阻力更小，超过 +0.07 判定看涨，低于 −0.07 判定看跌，其余为中性。
+              预测视界 15 分钟，目标/失效价来自墙与清算簇；中性预测不出目标价。
+            </p>
+          </div>
+          <div>
+            <h3>数据源 <em>SOURCES</em></h3>
+            <p>
+              实时数据来自 Binance USDⓈ-M 永续 WS，快照约每 0.9 秒推送一次；K 线为 1m / 15m。
+              实际强平为交易所 forceOrder 成交（本环境常为 0 笔）；清算地图、清算燃料为基于成交分布与杠杆结构的
+              <b>模型估算</b>，不代表交易所持仓数据。ETH 指标同理。
+            </p>
+          </div>
+          <div>
+            <h3>免责 <em>DISCLAIMER</em></h3>
+            <p>
+              仅供研究与技术演示，不构成投资建议。加密合约风险极高，历史统计不代表未来表现；请自行判断并承担风险。
+            </p>
+          </div>
         </div>
-        <div class="ev-meta micro" id="ev-meta">AWAITING EVENTS</div>
+      </details>
+      <div class="foot-meta">
+        <span>MIN·RESISTANCE <i>v1.1</i></span>
+        <span>源 <b id="foot-source">—</b></span>
+        <span>延迟 <b id="foot-latency">—</b></span>
+        <span>快照 <b id="foot-ts">—</b></span>
+        <span>运行 <b id="foot-uptime">—</b></span>
+        <span>仅供研究 · 非投资建议</span>
       </div>
-      <div class="ev-list" id="ev-list">
-        <div class="empty empty--events">正在建立事件流…</div>
-      </div>
+    </footer>
+
+    <div class="toast" id="toast" data-tone="muted" hidden>
+      <span class="toast-dot" aria-hidden="true"></span>
+      <span id="toast-text"></span>
     </div>
-  </section>
-</main>
 
-<footer class="footer">
-  <div class="foot-main">
-    <span class="micro">METHOD</span>
-    <p>最小阻力 = 盘口失衡 30% + 墙体阻力 24% + 清算燃料 22% + 主动流 14% + 流动性真空 10%，据此输出未来 15 分钟方向概率。价格总是沿阻力最小的方向移动；阻力来自挂单、墙体、清算簇与流动性真空。</p>
-  </div>
-  <div class="foot-meta">
-    <span>数据源 <b id="foot-source">—</b></span>
-    <span>数据延迟 <b id="foot-latency">—</b></span>
-    <span>快照时间 <b id="foot-ts">—</b></span>
-    <span>版本 <b id="foot-version">—</b></span>
-    <span>运行 <b id="foot-uptime">—</b></span>
-  </div>
-  <div class="foot-legal">
-    <span>仅供研究，不构成任何投资建议。所有「模型估算」均在界面单独标注，与交易所真实强平数据严格区分。</span>
-    <span>MIN·RESISTANCE © 2026 · RESEARCH ONLY</span>
-  </div>
-</footer>
+    <noscript>
+      <div class="noscript">本终端需要 JavaScript 才能显示实时行情。</div>
+    </noscript>
 
-<div class="toast" id="toast" role="status" aria-live="polite" hidden>
-  <i class="toast-dot"></i><span id="toast-text"></span>
-</div>
-<noscript><div class="noscript">本终端需要启用 JavaScript。</div></noscript>
-</body>
+    <script type="module" src="./js/app.js"></script>
+  </body>
 </html>

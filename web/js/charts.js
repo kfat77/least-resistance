@@ -5,16 +5,16 @@
 import { clamp, fmtClock, fmtNum, fmtPrice, fmtUsdCompact, fmtUsdCompactSigned, fmtHMS, fmtPct, fmtDistPct, reducedMotion } from './util.js';
 
 const COL = {
-  mint: '#3ef0b2',
-  rose: '#ff5f7a',
-  cyan: '#3cdcf2',
-  amber: '#ffb45f',
-  ink: '#e9eff8',
-  ink2: '#9aa8ba',
-  ink3: '#6b7a8d',
-  ink4: '#3e4a5a',
-  grid: 'rgba(143,163,190,0.1)',
-  grid2: 'rgba(143,163,190,0.16)',
+  mint: '#0ecb81',
+  rose: '#f6465d',
+  cyan: '#2dd4e8',
+  amber: '#f0b90b',
+  ink: '#eaeef4',
+  ink2: '#b9c2ce',
+  ink3: '#828e9d',
+  ink4: '#5c6876',
+  grid: 'rgba(130,142,157,0.1)',
+  grid2: 'rgba(130,142,157,0.17)',
 };
 
 const MONO_S = '9px ui-monospace, "SF Mono", "Cascadia Mono", monospace';
@@ -868,12 +868,272 @@ export class CvdChart extends Chart {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* CandleChart: 1m / 15m candles + volume + overlays + crosshair        */
+/* ------------------------------------------------------------------ */
+
+export class CandleChart extends Chart {
+  constructor(host) {
+    super(host);
+    this.pinned = 0;
+  }
+
+  setPinned(price) {
+    this.pinned = Number(price) || 0;
+    if (this.data) this.paint();
+  }
+
+  paint() {
+    const d = this.data;
+    if (!d || !Array.isArray(d.candles) || d.candles.length < 3) {
+      this.msg('等待 K 线数据', 'CANDLES · BINANCE USDⓈ-M');
+      return;
+    }
+    if (!this.reset()) return;
+    const { ctx, w, h } = this;
+    const show = d.show || {};
+    const padL = 6;
+    const padR = 56;
+    const padT = 8;
+    const padB = 18;
+    const plotW = Math.max(20, w - padL - padR);
+    const volH = Math.max(30, Math.round((h - padT - padB) * 0.19));
+    const priceH = Math.max(60, h - padT - padB - volH - 9);
+    const priceBottom = padT + priceH;
+    const volTop = priceBottom + 9;
+    const volBottom = h - padB;
+    const rows = d.candles.slice(-140);
+    const n = rows.length;
+    const step = plotW / n;
+    const cw = clamp(step * 0.62, 1, 9);
+    const p = this.phase;
+
+    let lo = Infinity;
+    let hi = -Infinity;
+    let maxVol = 0;
+    for (const c of rows) {
+      const l = Number(c[3]);
+      const gh = Number(c[2]);
+      if (Number.isFinite(l)) lo = Math.min(lo, l);
+      if (Number.isFinite(gh)) hi = Math.max(hi, gh);
+      maxVol = Math.max(maxVol, Number(c[5]) || 0);
+    }
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
+      this.msg('K 线数据异常');
+      return;
+    }
+    const cur = Number(d.price) || Number(rows[n - 1][4]);
+    lo = Math.min(lo, cur);
+    hi = Math.max(hi, cur);
+    if (this.pinned) {
+      lo = Math.min(lo, this.pinned);
+      hi = Math.max(hi, this.pinned);
+    }
+    if (hi <= lo) {
+      hi = lo + 1;
+      lo -= 1;
+    }
+    const pad = (hi - lo) * 0.05;
+    lo -= pad;
+    hi += pad;
+    const range = hi - lo;
+    const xs = (i) => padL + (i + 0.5) * step;
+    const ys = (price) => padT + ((hi - price) / range) * priceH * p + (1 - p) * priceH * 0.4;
+
+    /* --- grid --- */
+    for (let g = 0; g <= 3; g++) {
+      const price = hi - (range * g) / 3;
+      const y = padT + (priceH * g) / 3;
+      this.dashLine(padL, y, padL + plotW, y, COL.grid, [2, 4]);
+      this.text(fmtPrice(price), padL + plotW + 5, y, 'left', COL.ink4, MONO_S);
+    }
+    ctx.strokeStyle = COL.grid;
+    ctx.beginPath();
+    ctx.moveTo(padL, priceBottom + 0.5);
+    ctx.lineTo(padL + plotW, priceBottom + 0.5);
+    ctx.stroke();
+
+    const tLabel = (ts) => {
+      const hhmm = fmtClock(ts);
+      return hhmm.slice(0, 5);
+    };
+    for (let g = 0; g <= 4; g++) {
+      const i = Math.min(n - 1, Math.round((n - 1) * (g / 4)));
+      const x = xs(i);
+      if (g > 0 && g < 4) this.dashLine(x, padT, x, priceBottom, 'rgba(130,142,157,0.045)', [2, 5]);
+      this.text(tLabel(Number(rows[i][0])), x, h - 6, g === 0 ? 'left' : g === 4 ? 'right' : 'center', COL.ink4, MONO_S);
+    }
+
+    /* --- volume --- */
+    for (let i = 0; i < n; i++) {
+      const c = rows[i];
+      const o = Number(c[1]);
+      const cl = Number(c[4]);
+      const v = Number(c[5]) || 0;
+      const vh = maxVol ? (v / maxVol) * (volBottom - volTop) * 0.9 * p : 0;
+      const x = xs(i) - cw / 2;
+      ctx.fillStyle = cl >= o ? 'rgba(14,203,129,0.34)' : 'rgba(246,70,93,0.34)';
+      if (vh > 0) ctx.fillRect(x, volBottom - vh, cw, vh);
+    }
+
+    /* --- moving averages --- */
+    const closes = rows.map((c) => Number(c[4]));
+    const ma = (len) => closes.map((_, i) => {
+      if (i < len - 1) return null;
+      let sum = 0;
+      for (let k = i - len + 1; k <= i; k++) sum += closes[k];
+      return sum / len;
+    });
+    const drawMa = (len, color) => {
+      const vals = ma(len);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i < n; i++) {
+        const v = vals[i];
+        if (v == null) continue;
+        const x = xs(i);
+        const y = padT + ((hi - v) / range) * priceH;
+        if (!started) {
+          ctx.moveTo(x, y);
+          started = true;
+        } else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    };
+    if (show.ma) {
+      drawMa(7, 'rgba(240,185,11,0.85)');
+      drawMa(25, 'rgba(45,212,232,0.75)');
+    }
+
+    /* --- liquidation heat strip (model estimate) at right gutter --- */
+    if (show.liqs && Array.isArray(d.clusters) && d.clusters.length) {
+      let maxTotal = 0;
+      for (const cl of d.clusters) maxTotal = Math.max(maxTotal, (Number(cl.long_usd) || 0) + (Number(cl.short_usd) || 0));
+      maxTotal = maxTotal || 1;
+      for (const cl of d.clusters) {
+        const price = Number(cl.price);
+        if (!(price > lo && price < hi)) continue;
+        const total = (Number(cl.long_usd) || 0) + (Number(cl.short_usd) || 0);
+        if (!total) continue;
+        const y = padT + ((hi - price) / range) * priceH;
+        const a = 0.16 + 0.44 * clamp(total / maxTotal, 0, 1);
+        ctx.fillStyle = rgba(COL.cyan, a * p);
+        ctx.fillRect(padL + plotW + 1, y - 1.5, 4, 3);
+      }
+    }
+
+    /* --- walls / icebergs: right-edge markers + faint level line --- */
+    if (show.walls) {
+      const walls = Array.isArray(d.walls) ? d.walls.slice(0, 10) : [];
+      for (const wall of walls) {
+        const price = Number(wall.price);
+        if (!(price > lo && price < hi)) continue;
+        const y = padT + ((hi - price) / range) * priceH;
+        const kind = wall.kind || 'resting';
+        const color = kind === 'iceberg' ? COL.cyan : kind === 'spoof' ? COL.amber : COL.ink3;
+        this.dashLine(padL + plotW * 0.58, y, padL + plotW, y, rgba(color, 0.3), [2, 4]);
+        ctx.fillStyle = rgba(color, 0.9);
+        const dir = wall.side === 'bid' ? 1 : -1;
+        const ax = padL + plotW + 4;
+        ctx.beginPath();
+        ctx.moveTo(ax, y);
+        ctx.lineTo(ax + 5, y - 3 * dir);
+        ctx.lineTo(ax + 5, y + 3 * dir);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    /* --- candles --- */
+    for (let i = 0; i < n; i++) {
+      const c = rows[i];
+      const o = Number(c[1]);
+      const gh = Number(c[2]);
+      const l = Number(c[3]);
+      const cl = Number(c[4]);
+      if (![o, gh, l, cl].every(Number.isFinite)) continue;
+      const up = cl >= o;
+      const color = up ? COL.mint : COL.rose;
+      const x = xs(i);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(Math.round(x) + 0.5, ys(gh));
+      ctx.lineTo(Math.round(x) + 0.5, ys(l));
+      ctx.stroke();
+      const yO = ys(o);
+      const yC = ys(cl);
+      const bh = Math.max(1, Math.abs(yC - yO));
+      ctx.fillStyle = color;
+      if (cw >= 3) ctx.fillRect(x - cw / 2, Math.min(yO, yC), cw, bh);
+      else ctx.fillRect(x, Math.min(yO, yC), Math.max(1, cw), bh);
+    }
+
+    /* --- current price line + tag --- */
+    const cy = ys(cur);
+    this.dashLine(padL, cy, padL + plotW, cy, 'rgba(240,185,11,0.75)', [4, 4], 1);
+    ctx.fillStyle = COL.amber;
+    ctx.fillRect(padL + plotW + 1, cy - 8, padR - 2, 16);
+    this.text(fmtPrice(cur), w - 4, cy, 'right', '#10151b', MONO_M);
+
+    /* --- pinned price line --- */
+    if (this.pinned) {
+      const py = ys(this.pinned);
+      this.dashLine(padL, py, padL + plotW, py, 'rgba(45,212,232,0.7)', [3, 4], 1);
+      const label = `点击 ${fmtPrice(this.pinned)}`;
+      ctx.font = MONO_S;
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(11,14,17,0.9)';
+      ctx.fillRect(padL + plotW - tw - 8, py - 14, tw + 8, 13);
+      this.text(label, padL + plotW - 4, py - 7, 'right', COL.cyan, MONO_S);
+    }
+
+    /* --- crosshair + tooltip --- */
+    if (this.pointerX != null && this.pointerX >= padL && this.pointerX <= padL + plotW) {
+      const idx = clamp(Math.floor((this.pointerX - padL) / step), 0, n - 1);
+      const c = rows[idx];
+      const o = Number(c[1]);
+      const gh = Number(c[2]);
+      const l = Number(c[3]);
+      const cl = Number(c[4]);
+      const v = Number(c[5]) || 0;
+      const x = xs(idx);
+      this.dashLine(x, padT, x, volBottom, 'rgba(234,238,244,0.26)', [2, 3]);
+      if (this.pointerY != null && this.pointerY >= padT && this.pointerY <= priceBottom) {
+        const hoverPrice = hi - ((this.pointerY - padT) / priceH) * range;
+        this.dashLine(padL, this.pointerY, padL + plotW, this.pointerY, 'rgba(234,238,244,0.16)', [2, 3]);
+        ctx.fillStyle = 'rgba(30,36,45,0.95)';
+        ctx.fillRect(w - padR + 1, this.pointerY - 8, padR - 2, 16);
+        this.text(fmtPrice(hoverPrice), w - 4, this.pointerY, 'right', COL.ink2, MONO_M);
+      }
+      const up = cl >= o;
+      const chg = o ? ((cl - o) / o) * 100 : 0;
+      this.showTip(
+        `<div class="tp-t">${fmtClock(Number(c[0]))} · ${d.period === '15m' ? '15M' : '1M'}</div>` +
+          `<div class="tp-r"><span>开 / 高</span><b>${fmtPrice(o)} / ${fmtPrice(gh)}</b></div>` +
+          `<div class="tp-r"><span>低 / 收</span><b>${fmtPrice(l)} / ${fmtPrice(cl)}</b></div>` +
+          `<div class="tp-r"><span>涨跌</span><b class="${up ? 'up' : 'down'}">${fmtPct(chg, 2, true)}</b></div>` +
+          `<div class="tp-r"><span>成交量</span><b>${fmtNum(v, 3)}</b></div>`,
+        x,
+        this.pointerY == null ? padT + 20 : this.pointerY
+      );
+    } else {
+      this.hideTip();
+    }
+  }
+}
+
 /** Create a chart by kind for a host element. */
 export function createChart(kind, host) {
   let chart = null;
   switch (kind) {
     case 'spark':
       chart = new Spark(host);
+      break;
+    case 'candle':
+      chart = new CandleChart(host);
       break;
     case 'depth':
       chart = new DepthChart(host);
@@ -900,6 +1160,7 @@ export function createChart(kind, host) {
 
 const CHART_LABELS = {
   spark: '近 60 分钟价格迷你走势图',
+  candle: 'K 线主图，含成交量、当前价线、墙与冰山标记',
   depth: '订单簿深度剖面与模型清算热力',
   friction: '上行与下行累计摩擦成本曲线',
   liqmap: '模型估算强平地图',

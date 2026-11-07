@@ -1,18 +1,8 @@
-/* MIN·RESISTANCE — app bootstrap: WebSocket transport with exponential backoff,
-   polling fallback, mock simulation (?mock=1), top bar clock/latency, stale
-   detection, footer metadata and the dashboard render loop. */
+/* MIN·RESISTANCE — transport + chrome: WebSocket with exponential backoff,
+   polling fallback, mock simulation (?mock=1), stale detection, clock and status. */
 
 import { Dashboard } from './views.js';
-import {
-  fmtAge,
-  fmtClock,
-  fmtDurationZh,
-  fmtHMS,
-  fmtLatencyMs,
-  num,
-  setClass,
-  setTxt,
-} from './util.js';
+import { fmtAge, fmtClock, fmtDurationZh, fmtHMS, fmtLatencyMs, num, setClass, setTxt } from './util.js';
 
 const IS_MOCK = new URLSearchParams(window.location.search).get('mock') === '1';
 const POLL_MS = 1800;
@@ -23,6 +13,7 @@ const WS_WATCHDOG_MS = 7000;
 const STATUS_LABEL = {
   boot: '连接中',
   live: 'LIVE 实时',
+  sim: 'SIM 模拟',
   polling: '轮询降级',
   reconnecting: '重连中',
   offline: '链路中断',
@@ -47,6 +38,7 @@ class App {
     this.lastWsMsgAt = 0;
     this.rendered = false;
     this.toastTimer = 0;
+    this.actionToastUntil = 0;
     this.clockText = '';
 
     this.chip = document.getElementById('conn-chip');
@@ -61,14 +53,16 @@ class App {
       source: document.getElementById('foot-source'),
       latency: document.getElementById('foot-latency'),
       ts: document.getElementById('foot-ts'),
-      version: document.getElementById('foot-version'),
       uptime: document.getElementById('foot-uptime'),
     };
-    this.heroMeta = document.getElementById('hero-meta');
   }
 
   start() {
     this.dash = new Dashboard(document);
+    this.dash.onToast = (message, toneName) => {
+      this.actionToastUntil = Date.now() + 2200;
+      this.toast(message, toneName || 'muted', 2200);
+    };
     this.tickClock();
     setInterval(() => this.tickClock(), 300);
     setInterval(() => this.tickMeta(), 400);
@@ -79,36 +73,17 @@ class App {
     });
     if (this.isMock) this.startMock();
     else this.connectWS(true);
-    this.setupSpy();
+    this.initNav();
   }
 
-  /* ---------------- jump nav scroll spy ---------------- */
-
-  setupSpy() {
-    const links = [...document.querySelectorAll('.jump a[href^="#"]')];
-    if (!links.length) return;
-    const map = new Map(links.map((a) => [a.getAttribute('href').slice(1), a]));
-    const sections = [...document.querySelectorAll('.section[id]')].filter((el) => map.has(el.id));
-    if (!sections.length) return;
-    let frame = 0;
-    const update = () => {
-      frame = 0;
-      const y = window.scrollY + 140;
-      let active = null;
-      for (const sec of sections) if (sec.offsetTop <= y) active = sec;
-      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
-      if (atBottom) active = sections[sections.length - 1];
-      const link = active ? map.get(active.id) : null;
-      for (const a of links) a.classList.toggle('active', a === link);
-    };
-    window.addEventListener(
-      'scroll',
-      () => {
-        if (!frame) frame = requestAnimationFrame(update);
-      },
-      { passive: true }
-    );
-    update();
+  /* section nav: scroll lower panel into view (used by the top nav buttons) */
+  initNav() {
+    const hash = window.location.hash;
+    if (!hash) return;
+    const dash = this.dash;
+    if (hash === '#depth') dash.goSection('depth');
+    else if (hash === '#ledger') dash.goSection('ledger');
+    else if (hash === '#events') dash.goSection('events');
   }
 
   /* ---------------- transport ---------------- */
@@ -221,9 +196,7 @@ class App {
         if (!n) return n;
         return n > 1e12 ? n + shift : n + shift / 1000;
       };
-      if (Array.isArray(base.events)) {
-        base.events = base.events.map((ev) => ({ ...ev, ts: bumpTs(ev.ts) }));
-      }
+      if (Array.isArray(base.events)) base.events = base.events.map((ev) => ({ ...ev, ts: bumpTs(ev.ts) }));
       for (const key of Object.keys(base.symbols || {})) {
         const s = base.symbols[key];
         const chart = s.chart || {};
@@ -267,13 +240,7 @@ class App {
     snap.mode = 'sim';
     snap.base_mode = 'mock';
     snap.uptime_s = num(snap.uptime_s) + this.mockTick * 0.9;
-    snap.feed = {
-      ...snap.feed,
-      state: 'live',
-      source: 'mock-static',
-      last_msg_ts: now / 1000,
-      last_msg_age_s: 0,
-    };
+    snap.feed = { ...snap.feed, state: 'live', source: 'mock-static', last_msg_ts: now / 1000, last_msg_age_s: 0 };
     const wobble = Math.sin(this.mockTick / 11) * 0.6 + (Math.random() - 0.5) * 0.5;
     for (const key of snap.symbol_order || []) {
       const s = snap.symbols[key];
@@ -284,7 +251,6 @@ class App {
       const price = mid + wobble * spreadUsd * 2.2;
       s.price = price;
       s.updated_ts = now;
-      s.change_24h_pct = num(s.change_24h_pct) + ((price / (mid || 1)) - 1) * 100;
       const candles = s.chart && s.chart.candles_1m;
       if (Array.isArray(candles) && candles.length) {
         const last = candles[candles.length - 1];
@@ -325,8 +291,7 @@ class App {
     this.lastRecvAt = performance.now();
     const now = Date.now();
     try {
-      if (!this.dash.mounted) this.dash.mount(snap, { mock: this.isMock });
-      else this.dash.render(snap, { now, mock: this.isMock });
+      this.dash.render(snap, { now, mock: this.isMock });
       this.rendered = true;
       document.body.classList.remove('is-booting');
     } catch (err) {
@@ -346,7 +311,6 @@ class App {
     if (this.foot.source) setTxt(this.foot.source, source);
     if (this.foot.latency) setTxt(this.foot.latency, fmtLatencyMs(latency));
     if (this.foot.ts) setTxt(this.foot.ts, `${fmtHMS(num(snap.ts))} UTC+8`);
-    if (this.foot.version) setTxt(this.foot.version, snap.version ? `v${snap.version}` : '—');
     if (this.foot.uptime) setTxt(this.foot.uptime, fmtDurationZh(num(snap.uptime_s)));
     this.tickMeta();
   }
@@ -375,7 +339,7 @@ class App {
     document.body.classList.toggle('is-stale', stale);
 
     if (this.isMock) {
-      this.hideToast();
+      if (Date.now() > this.actionToastUntil) this.hideToast();
       return;
     }
     if (this.status === 'offline') {
@@ -384,10 +348,6 @@ class App {
     }
     if (stale) {
       this.toast(`数据延迟 ${fmtAge(age)} · 推送停滞，正在恢复`, 'amber', 0);
-      return;
-    }
-    if (this.status === 'reconnecting' && !this.rendered) {
-      this.toast('正在建立行情链路…', 'amber', 0);
       return;
     }
     this.hideToast();
@@ -407,21 +367,18 @@ class App {
     const snap = this.snap;
     if (!snap) return;
     const now = Date.now();
-    const ts = num(snap.ts, now);
-    const age = Math.max(0, now - ts);
-    const latency = age;
+    const age = Math.max(0, now - num(snap.ts, now));
     if (this.ageEl) {
       setTxt(this.ageEl, fmtAge(age));
       setClass(this.ageEl, 'is-warn', age > STALE_MS);
       setClass(this.ageEl, 'is-bad', age > 9000);
     }
-    if (this.latencyEl && !this.isMock) setTxt(this.latencyEl, fmtLatencyMs(latency));
-    if (this.foot.latency) setTxt(this.foot.latency, fmtLatencyMs(latency));
+    if (this.latencyEl && !this.isMock) setTxt(this.latencyEl, fmtLatencyMs(age));
+    if (this.foot.latency) setTxt(this.foot.latency, fmtLatencyMs(age));
 
     const stale = age > STALE_MS;
     document.body.classList.toggle('is-stale', stale);
 
-    /* WS watchdog: open socket that stopped pushing gets recycled */
     if (this.ws && this.ws.readyState === WebSocket.OPEN && this.lastWsMsgAt) {
       if (performance.now() - this.lastWsMsgAt > WS_WATCHDOG_MS) {
         try {
@@ -440,15 +397,15 @@ class App {
     const card = document.querySelector('.boot-card');
     if (!card) return;
     const title = card.querySelector('p');
-    const sub = card.querySelector('.micro');
+    const sub = card.querySelector('em');
     if (state === 'offline') {
       card.dataset.state = 'offline';
       setTxt(title, '行情链路中断 · 重试中');
-      setTxt(sub, 'WebSocket 自动重连 · 轮询 /api/snapshot 兜底');
+      setTxt(sub, 'WebSocket 自动重连 · 轮询 /API/SNAPSHOT 兜底');
     } else {
       card.dataset.state = 'connecting';
       setTxt(title, '建立数据链路 · CONNECTING');
-      setTxt(sub, 'Binance USDⓈ-M PERPETUAL · WS / 900ms');
+      setTxt(sub, 'BINANCE USDⓈ-M PERPETUAL · WS / 900MS');
     }
   }
 
@@ -458,9 +415,7 @@ class App {
     this.toastEl.dataset.tone = tone;
     setTxt(this.toastText, message);
     window.clearTimeout(this.toastTimer);
-    if (duration > 0) {
-      this.toastTimer = window.setTimeout(() => this.hideToast(), duration);
-    }
+    if (duration > 0) this.toastTimer = window.setTimeout(() => this.hideToast(), duration);
   }
 
   hideToast() {
@@ -472,3 +427,4 @@ class App {
 
 const app = new App();
 app.start();
+
