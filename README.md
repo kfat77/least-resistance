@@ -24,10 +24,10 @@ GitHub Pages 只托管静态文件；页面第一次加载会下载约 13 MB 的
    仍为真实数据，但**资金费率 / 持仓量 / 标记价格显示 `—`，实际强平为 0**，
    清算带仅保留模型估算，页面会标注「现货 SPOT」。
 
-![终端预览](screenshots/pages-live.png)
+![终端预览](screenshots/pages-online.png)
 
 > 其他截图：[现货回退模式](screenshots/pages-spot.png) ·
-> [移动端](screenshots/pages-mobile.png) ·
+> [移动端](screenshots/pages-online-mobile.png) ·
 > [离线 mock 预览](screenshots/pages-mock.png) ·
 > [关键位与交易所布局](screenshots/exchange-desktop.png)
 
