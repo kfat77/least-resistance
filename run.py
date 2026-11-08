@@ -64,6 +64,8 @@ async def main(args: argparse.Namespace) -> None:
     url = f"http://{args.host}:{args.port}/"
     print(BANNER)
     print(f"  data source : {mode.upper()}  ({note})")
+    shadow_mode = next(m for m in config.WALL_MODES if m != config.WALL_MODE)
+    print(f"  wall mode   : {config.WALL_MODE.upper()}  (A/B shadow: {shadow_mode})")
     print(f"  dashboard   : {url}")
     print(f"  snapshot    : {url}api/snapshot")
     print(f"  websocket   : ws://{args.host}:{args.port}/ws")
@@ -100,12 +102,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default=config.HOST)
     parser.add_argument("--port", type=int, default=config.PORT)
     parser.add_argument("--probe-timeout", type=float, default=4.0)
+    parser.add_argument(
+        "--wall-mode",
+        choices=config.WALL_MODES,
+        default=None,
+        help="override WALL_MODE for this process; the other mode is logged in shadow",
+    )
     parser.add_argument("--open", action="store_true", help="open the dashboard in a browser")
     return parser
 
 
 def run() -> None:
     args = build_parser().parse_args()
+    if args.wall_mode is not None:
+        config.WALL_MODE = args.wall_mode
     try:
         asyncio.run(main(args))
     except KeyboardInterrupt:

@@ -99,6 +99,22 @@ K 线每 45s 刷新；④ 交易所返回 418/429 时按 `Retry-After` 暂停全
 方向是否命中，并计算 Brier 分数；页面上展示滚动准确率，而不是只展示「好看」的
 当前判断。详细公式、阈值与局限见 [docs/methodology.md](docs/methodology.md)。
 
+### 墙模式 A/B（WALL_MODE）
+
+同一面墙可以有两种互斥解读：`barrier` 把买墙视为支撑、卖墙视为压制（墙挡住价格）；
+`magnet` 把大额挂单视为磁吸位（买墙把价格往下吸、卖墙往上吸）。系统不靠主观偏好
+选边，而是让两种解读**在同一段行情上并行记账**：当前 `WALL_MODE` 驱动页面展示，
+另一种模式写入影子账本；两者都按 60 秒记录、15 分钟结算，分别统计命中率与 Brier。
+服务端每 2 秒在后台生成一次快照推进账本（`LEDGER_TICK_S`），所以没有人打开页面时
+A/B 仍会积累样本；静态站则由浏览器内的 Worker 每 900ms 推进。
+
+- 切换：`python run.py --mode live --wall-mode magnet`，或设置环境变量
+  `WALL_MODE=magnet`（仅接受 `barrier` / `magnet`，非法值启动即报错）。
+- 对比：`python scripts/compare_wall_modes.py --url http://127.0.0.1:8765/api/snapshot`。
+- 决策规则：两种模式各累计至少 20 条已结算样本后，Brier 更低者胜出；样本不足时
+  保留 `barrier` 作为默认值。结果字段见 [docs/API.md](docs/API.md)（`accuracy_ab`
+  与 `accuracy_alt_ab`）。
+
 ## 项目结构
 
 ```

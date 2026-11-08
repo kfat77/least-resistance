@@ -43,6 +43,7 @@ class SymbolState:
     tape: analytics.TradeTape
     liq: analytics.LiquidationBook
     ledger: PredictionLedger
+    shadow_ledger: PredictionLedger
     ticker: dict = field(default_factory=dict)
     mark_price: float = 0.0
     index_price: float = 0.0
@@ -61,10 +62,13 @@ class SymbolState:
 class MarketHub:
     def __init__(self, resolved_mode: str = "live") -> None:
         self.started = time.time()
+        self.ab_started = self.started
         self.base_mode = resolved_mode
         self.mode = "connecting"
         self.data_dir = config.DATA_DIR / ("sim" if resolved_mode == "sim" else "live")
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.wall_mode = config.WALL_MODE
+        self.wall_mode_alt = next(m for m in config.WALL_MODES if m != self.wall_mode)
         self.states: dict[str, SymbolState] = {}
         for symbol in config.SYMBOLS:
             state = SymbolState(
@@ -75,7 +79,11 @@ class MarketHub:
                 liq=analytics.LiquidationBook(),
                 ledger=PredictionLedger(
                     symbol,
-                    self.data_dir / f"predictions_{symbol}.json",
+                    self._ledger_path(symbol, self.wall_mode),
+                ),
+                shadow_ledger=PredictionLedger(
+                    symbol,
+                    self._ledger_path(symbol, self.wall_mode_alt),
                 ),
             )
             state.liq.load(self._load_liquidation_rows(symbol))
@@ -103,6 +111,14 @@ class MarketHub:
             symbol: self.data_dir / f"liquidations_{symbol}.jsonl" for symbol in config.SYMBOLS
         }
         self._iceberg_cooldown_s = 600.0
+
+    def _ledger_path(self, symbol: str, mode: str) -> Path:
+        """Keep the legacy barrier ledger and give the A/B shadow its own file."""
+        if mode == "barrier":
+            legacy = self.data_dir / f"predictions_{symbol}.json"
+            if legacy.exists():
+                return legacy
+        return self.data_dir / f"predictions_{symbol}_{mode}.json"
 
     # ------------------------------------------------------------------
     # feed plumbing
@@ -271,6 +287,10 @@ class MarketHub:
                 "name": "least-resistance",
                 "horizon_min": config.PREDICTION_HORIZON_MIN,
                 "weights": config.SIGNAL_WEIGHTS,
+                "wall_mode": self.wall_mode,
+                "wall_mode_alt": self.wall_mode_alt,
+                "wall_modes": list(config.WALL_MODES),
+                "ab_started": int(self.ab_started * 1000),
                 "disclaimer": "仅供研究，不构成投资建议",
             },
         }
@@ -320,7 +340,19 @@ class MarketHub:
                     "friction": [],
                     "signals": [],
                     "prediction": None,
-                    "accuracy": state.ledger.stats(),
+                    "accuracy": {**state.ledger.stats(), "wall_mode": self.wall_mode},
+                    "accuracy_alt": {
+                        **state.shadow_ledger.stats(),
+                        "wall_mode": self.wall_mode_alt,
+                    },
+                    "accuracy_ab": {
+                        **state.ledger.stats(self.ab_started),
+                        "wall_mode": self.wall_mode,
+                    },
+                    "accuracy_alt_ab": {
+                        **state.shadow_ledger.stats(self.ab_started),
+                        "wall_mode": self.wall_mode_alt,
+                    },
                     "chart": {"candles_1m": [], "candles_15m": [], "estimated_liq": []},
                 }
             )
@@ -340,12 +372,20 @@ class MarketHub:
         self._detect_iceberg_events(state, icebergs, now)
 
         components = self._components(
-            bands, walls, icebergs, liq_summary, estimated, flow, vacuum, mid, state.symbol
+            bands, walls, icebergs, liq_summary, estimated, flow, vacuum, mid, state.symbol,
+            self.wall_mode,
+        )
+        shadow_components = self._components(
+            bands, walls, icebergs, liq_summary, estimated, flow, vacuum, mid, state.symbol,
+            self.wall_mode_alt,
         )
         prediction = self._prediction(state, components, walls, liq_summary, estimated, mid, now)
+        shadow_prediction = self._shadow_prediction(shadow_components)
         state.ledger.resolve_due(now, price or mid)
+        state.shadow_ledger.resolve_due(now, price or mid)
         if prediction is not None:
             state.ledger.maybe_log(now, price or mid, prediction)
+            state.shadow_ledger.maybe_log(now, price or mid, shadow_prediction)
 
         base.update(
             {
@@ -375,7 +415,19 @@ class MarketHub:
                 "friction": friction,
                 "signals": self._signals(components),
                 "prediction": prediction,
-                "accuracy": state.ledger.stats(),
+                "accuracy": {**state.ledger.stats(), "wall_mode": self.wall_mode},
+                "accuracy_alt": {
+                    **state.shadow_ledger.stats(),
+                    "wall_mode": self.wall_mode_alt,
+                },
+                "accuracy_ab": {
+                    **state.ledger.stats(self.ab_started),
+                    "wall_mode": self.wall_mode,
+                },
+                "accuracy_alt_ab": {
+                    **state.shadow_ledger.stats(self.ab_started),
+                    "wall_mode": self.wall_mode_alt,
+                },
                 "chart": {
                     "candles_1m": state.klines.get("1m", [])[-config.CANDLE_1M_LIMIT :],
                     "candles_15m": state.klines.get("15m", [])[-config.CANDLE_15M_LIMIT :],
@@ -397,6 +449,7 @@ class MarketHub:
         vacuum: dict,
         mid: float,
         symbol: str,
+        wall_mode: str,
     ) -> list[dict]:
         def band_imb(dist: float) -> float:
             for band in bands.get("bands", []):
@@ -406,7 +459,7 @@ class MarketHub:
 
         book_score = analytics.clamp(0.45 * band_imb(0.5) + 0.55 * band_imb(1.0))
         wall_score, bid_absorbed, ask_absorbed = analytics.wall_pressure(
-            walls, icebergs, mid, symbol
+            walls, icebergs, mid, symbol, wall_mode
         )
         liq_score, above, below = analytics.liquidation_pressure(liq_summary, estimated, mid)
         flow_score = analytics.clamp(flow.get("ratio", 0.0))
@@ -497,16 +550,7 @@ class MarketHub:
             )
         return signals
 
-    def _prediction(
-        self,
-        state: SymbolState,
-        components: list[dict],
-        walls: dict,
-        liq_summary: dict,
-        estimated: list[dict],
-        mid: float,
-        now: float,
-    ) -> dict:
+    def _composite(self, components: list[dict]) -> tuple[float, float, str, float]:
         score = sum(c["score"] * c["weight"] for c in components)
         p_up = analytics.sigmoid(score * config.PREDICTION_CONFIDENCE_GAIN)
         threshold = config.PREDICTION_DIRECTION_THRESHOLD
@@ -517,6 +561,29 @@ class MarketHub:
         else:
             direction = "neutral"
         confidence = max(p_up, 1.0 - p_up)
+        return score, p_up, direction, confidence
+
+    def _shadow_prediction(self, components: list[dict]) -> dict:
+        """Only the fields the A/B ledger scores; targets/narrative stay active-mode."""
+        score, p_up, direction, confidence = self._composite(components)
+        return {
+            "direction": direction,
+            "p_up": round(p_up, 4),
+            "score": round(score, 4),
+            "confidence": round(confidence, 4),
+        }
+
+    def _prediction(
+        self,
+        state: SymbolState,
+        components: list[dict],
+        walls: dict,
+        liq_summary: dict,
+        estimated: list[dict],
+        mid: float,
+        now: float,
+    ) -> dict:
+        score, p_up, direction, confidence = self._composite(components)
         targets = analytics.pick_targets(direction, mid, walls, estimated, liq_summary)
         levels = targets["levels"]
         narrative = self._narrative(

@@ -537,7 +537,11 @@ def vacuum_metrics(book: OrderBook) -> dict:
 
 
 def wall_pressure(
-    walls: dict, icebergs: list[dict], mid: float, symbol: str
+    walls: dict,
+    icebergs: list[dict],
+    mid: float,
+    symbol: str,
+    mode: str = "barrier",
 ) -> tuple[float, float, float]:
     """Absorbed-volume asymmetry at wall and iceberg levels.
 
@@ -546,9 +550,14 @@ def wall_pressure(
     large orders have actually absorbed aggressive flow, with a small bonus for
     levels that keep refilling after being hit. Absolute absorbed volume scales
     the score so one small print cannot saturate the component.
+
+    ``mode='barrier'`` reads a defended bid wall as support (score positive);
+    ``mode='magnet'`` treats the same wall as a downside magnet (score negative).
     """
     absorbed = {"bid": 0.0, "ask": 0.0}
     seen: set[tuple[str, float]] = set()
+    if mode not in config.WALL_MODES:
+        raise ValueError(f"unknown wall mode {mode!r}")
 
     def add(order: dict, side: str, price: float) -> None:
         dist = abs(price - mid) / mid if mid else 0.0
@@ -578,6 +587,8 @@ def wall_pressure(
     full = config.WALL_ABSORB_FULL_USD[symbol]
     conviction = min(1.0, total / full)
     score = clamp((bid_absorbed - ask_absorbed) / total * conviction)
+    if mode == "magnet":
+        score = -score
     return score, bid_absorbed, ask_absorbed
 
 

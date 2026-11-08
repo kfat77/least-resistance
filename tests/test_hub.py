@@ -40,6 +40,8 @@ def test_snapshot_has_both_symbols_and_serializes(tmp_path, monkeypatch) -> None
     assert snapshot["mode"] == "live"
     assert snapshot["symbol_order"] == list(config.SYMBOLS)
     assert snapshot["model"]["horizon_min"] == config.PREDICTION_HORIZON_MIN
+    assert snapshot["model"]["wall_mode"] == config.WALL_MODE
+    assert snapshot["model"]["wall_mode_alt"] != config.WALL_MODE
     for symbol in config.SYMBOLS:
         data = snapshot["symbols"][symbol]
         assert data["ready"] is True
@@ -49,6 +51,9 @@ def test_snapshot_has_both_symbols_and_serializes(tmp_path, monkeypatch) -> None
         assert set(data["flow"]) >= {"buy_usd", "sell_usd", "delta_usd", "cvd"}
         assert data["prediction"]["direction"] in {"up", "down", "neutral"}
         assert data["accuracy"]["horizon_min"] == config.PREDICTION_HORIZON_MIN
+        assert data["accuracy"]["wall_mode"] == config.WALL_MODE
+        assert data["accuracy_alt"]["wall_mode"] != config.WALL_MODE
+        assert data["accuracy_alt"]["logged"] >= 1
         assert data["chart"]["candles_1m"]
 
 
@@ -91,3 +96,15 @@ def test_health_fields_come_from_ticker(tmp_path, monkeypatch) -> None:
     hub = _hub(tmp_path, monkeypatch)
     hub.on_ticker("BTCUSDT", {"c": "123.5", "h": "1", "l": "1", "P": "0", "q": "1"})
     assert hub.states["BTCUSDT"].ticker["last"] == 123.5
+
+
+def test_wall_mode_switch_sets_active_and_shadow(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(config, "WALL_MODE", "magnet")
+    hub = _hub(tmp_path, monkeypatch)
+    _fill_book(hub, "BTCUSDT")
+    snapshot = hub.snapshot()
+    assert snapshot["model"]["wall_mode"] == "magnet"
+    assert snapshot["model"]["wall_mode_alt"] == "barrier"
+    data = snapshot["symbols"]["BTCUSDT"]
+    assert data["accuracy"]["wall_mode"] == "magnet"
+    assert data["accuracy_alt"]["wall_mode"] == "barrier"

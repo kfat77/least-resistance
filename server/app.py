@@ -36,6 +36,26 @@ class SnapshotCache:
 
 
 CACHE_KEY = web.AppKey("snapshot_cache", SnapshotCache)
+LEDGER_TASK_KEY = web.AppKey("ledger_task", asyncio.Task)
+
+
+async def _ledger_ticker(app: web.Application) -> None:
+    """Advance the prediction ledger even while no dashboard is connected."""
+    cache: SnapshotCache = app[CACHE_KEY]
+    while True:
+        await asyncio.sleep(config.LEDGER_TICK_S)
+        cache.get()
+
+
+async def _start_ledger(app: web.Application) -> None:
+    app[LEDGER_TASK_KEY] = asyncio.create_task(_ledger_ticker(app))
+
+
+async def _stop_ledger(app: web.Application) -> None:
+    task: asyncio.Task = app[LEDGER_TASK_KEY]
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
 
 
 async def index(request: web.Request) -> web.StreamResponse:
@@ -119,4 +139,6 @@ def create_app(hub: MarketHub) -> web.Application:
     app.router.add_static("/js", WEB_ROOT / "js")
     app.router.add_static("/mock", WEB_ROOT / "mock")
     app.router.add_static("/assets", WEB_ROOT / "assets")
+    app.on_startup.append(_start_ledger)
+    app.on_cleanup.append(_stop_ledger)
     return app

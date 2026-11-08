@@ -92,3 +92,19 @@ def test_resolution_waits_for_horizon(tmp_path) -> None:
     ledger.maybe_log(1_000.0, 100.0, _prediction())
     assert ledger.resolve_due(1_000.0 + 60, 101.0) == []
     assert ledger.stats()["pending"] == 1
+
+
+def test_stats_since_excludes_pre_experiment_entries(tmp_path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.maybe_log(1_000.0, 100.0, _prediction("up", p_up=0.7))
+    ledger.resolve_due(1_000.0 + 15 * 60 + 1, 101.0)
+    ledger.maybe_log(2_000.0, 100.0, _prediction("down", p_up=0.3))
+    ledger.resolve_due(2_000.0 + 15 * 60 + 1, 99.0)
+
+    full = ledger.stats()
+    experiment = ledger.stats(since=1_500.0)
+    assert full["samples"] == 2
+    assert experiment["samples"] == 1
+    assert experiment["logged"] == 1
+    assert experiment["hit_rate"] == 1.0
+    assert experiment["brier"] == pytest.approx((0.3 - 0.0) ** 2)

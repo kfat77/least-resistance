@@ -48,10 +48,18 @@ snapshot 结构并交给现有 Dashboard 渲染。相比后端快照，静态版
     "name": "least-resistance",
     "horizon_min": 15,
     "weights": { "book": 0.3, "walls": 0.24, "liquidations": 0.22, "flow": 0.14, "vacuum": 0.1 },
+    "wall_mode": "barrier",
+    "wall_mode_alt": "magnet",
+    "wall_modes": ["barrier", "magnet"],
+    "ab_started": 1794173466069,
     "disclaimer": "仅供研究，不构成投资建议"
   }
 }
 ```
+
+`wall_mode` 是当前展示模式；`wall_mode_alt` 是并行记账的影子模式。`ab_started`
+（毫秒）是本次 A/B 的实验起点，只有该时间之后的样本计入 `accuracy_ab` 与
+`accuracy_alt_ab`，历史账本不参与对照。
 
 `feed`：`{state, source, last_msg_ts, last_msg_age_s, error, spot, symbols: {SYM: {connected, book_ready, reconnects, resyncs, messages, last_msg_age_s, stale}}}`。
 `feed.spot` 是现货成交镜像流的状态（`connecting` / `live` / `reconnecting: ...`），仅 live 模式存在。
@@ -181,9 +189,17 @@ snapshot 结构并交给现有 Dashboard 渲染。相比后端快照，静态版
 
 ```json
 "accuracy": {"samples": 12, "hits": 7, "hit_rate": 0.5833, "brier": 0.241,
-             "pending": 2, "logged": 14, "horizon_min": 15,
-             "recent": [{"ts": 1794038000000, "direction": "up", "p_up": 0.59, "resolved": true, "correct": true, "move_pct": 0.12}]}
+             "pending": 2, "logged": 14, "horizon_min": 15, "wall_mode": "barrier",
+             "recent": [{"ts": 1794038000000, "direction": "up", "p_up": 0.59, "resolved": true, "correct": true, "move_pct": 0.12}]},
+"accuracy_alt": {"samples": 3, "hits": 1, "hit_rate": 0.3333, "brier": 0.28,
+                 "pending": 1, "logged": 4, "horizon_min": 15, "wall_mode": "magnet", "recent": [...]},
+"accuracy_ab": {"...": "same fields, active mode, only samples logged since model.ab_started"},
+"accuracy_alt_ab": {"...": "same fields, shadow mode, only samples since model.ab_started"}
 ```
+
+`accuracy` 是当前展示模式的完整账本；`accuracy_alt` 是影子模式的完整账本。
+`accuracy_ab` / `accuracy_alt_ab` 只统计 `model.ab_started` 之后的样本，用于
+公平 A/B。两部分字段结构相同；比较脚本读取 `_ab` 版本。
 
 `chart.candles_1m` / `candles_15m`：`[ts, open, high, low, close, volume]`（volume 是币量）。
 `chart.estimated_liq`：同 `liquidations.estimated`，画 K 线叠加热力用。

@@ -216,6 +216,23 @@ def test_wall_pressure_skips_icebergs_already_counted_as_walls(monkeypatch) -> N
     assert score == pytest.approx(0.0)
 
 
+def test_wall_pressure_magnet_mode_mirrors_barrier(monkeypatch) -> None:
+    monkeypatch.setitem(config.WALL_ABSORB_FULL_USD, BTC, 10_000.0)
+    walls = {
+        "walls": [
+            {"side": "bid", "price": 99.0, "absorbed_usd": 120_000.0, "refills": 0},
+            {"side": "ask", "price": 101.0, "absorbed_usd": 30_000.0, "refills": 0},
+        ]
+    }
+    barrier = wall_pressure(walls, [], 100.0, BTC, "barrier")[0]
+    magnet = wall_pressure(walls, [], 100.0, BTC, "magnet")[0]
+    assert barrier == pytest.approx(0.6)
+    assert magnet == pytest.approx(-0.6)
+
+    with pytest.raises(ValueError):
+        wall_pressure(walls, [], 100.0, BTC, "sideways")
+
+
 def test_vacuum_reads_outside_the_book_signal_corridor() -> None:
     inner_bids = [[str(100.0 - i / 100), "100"] for i in range(1, 100)]
     inner_asks = [[str(100.0 + i / 100), "100"] for i in range(1, 100)]

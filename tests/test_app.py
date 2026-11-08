@@ -6,7 +6,7 @@ import time
 from aiohttp.test_utils import TestClient, TestServer
 
 from server import config
-from server.app import create_app
+from server.app import CACHE_KEY, create_app
 from server.hub import MarketHub
 
 
@@ -61,5 +61,21 @@ def test_websocket_pushes_full_snapshots(tmp_path, monkeypatch) -> None:
                 assert "symbols" in first
                 second = await ws.receive_json(timeout=5)
                 assert second["ts"] >= first["ts"]
+
+    asyncio.run(scenario())
+
+
+def test_background_tick_builds_snapshots_without_requests(tmp_path, monkeypatch) -> None:
+    """Prediction accounting must not depend on a dashboard being connected."""
+    hub = _prepared_hub(tmp_path, monkeypatch)
+    monkeypatch.setattr(config, "LEDGER_TICK_S", 0.05)
+
+    async def scenario() -> None:
+        app = create_app(hub)
+        async with TestServer(app):
+            cache = app[CACHE_KEY]
+            assert cache._built_at == 0.0
+            await asyncio.sleep(0.25)
+            assert cache._built_at > 0.0
 
     asyncio.run(scenario())

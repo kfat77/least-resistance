@@ -5,6 +5,7 @@ rather than inside the analytics modules.  Distances are fractions of the mid
 price, notional values are USD.
 """
 
+import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -110,6 +111,15 @@ SIGNAL_WEIGHTS = {
 # absorption at the levels themselves, vacuum outside the wall scan range.
 VACUUM_LOW = 0.015
 VACUUM_HIGH = 0.03
+
+# A/B switch for the wall interpretation.  "barrier" treats a defended wall as
+# a hurdle (bid wall supports, ask wall caps); "magnet" treats it as a target
+# that pulls price toward it (bid wall pulls down, ask wall pulls up).  Both
+# modes are logged in parallel; decide the default from Brier/hit-rate evidence.
+WALL_MODES = ("barrier", "magnet")
+WALL_MODE = os.environ.get("WALL_MODE", "barrier").strip().lower()
+if WALL_MODE not in WALL_MODES:
+    raise ValueError(f"WALL_MODE must be one of {WALL_MODES}, got {WALL_MODE!r}")
 PREDICTION_HORIZON_MIN = 15
 PREDICTION_INTERVAL_S = 60.0
 PREDICTION_DIRECTION_THRESHOLD = 0.07
@@ -123,6 +133,10 @@ TARGET_MAX_PCT = 0.012
 # ---------------------------------------------------------------------------
 HOST = "127.0.0.1"
 PORT = 8765
+# Snapshot generation also advances the prediction ledger. A slow background
+# tick keeps that ledger moving when nobody has a page open, so accuracy and
+# the wall-mode A/B do not depend on viewer traffic.
+LEDGER_TICK_S = 2.0
 PUSH_INTERVAL_MS = 900
 CANDLE_REFRESH_S = 25.0
 CANDLE_1M_LIMIT = 180

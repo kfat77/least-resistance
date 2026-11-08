@@ -112,8 +112,9 @@ class PredictionLedger:
         return resolved
 
     # -- reads -------------------------------------------------------------
-    def stats(self) -> dict:
-        resolved = [e for e in self.entries if e.get("resolved")]
+    def stats(self, since: float | None = None) -> dict:
+        entries = [e for e in self.entries if since is None or float(e["ts"]) >= since]
+        resolved = [e for e in entries if e.get("resolved")]
         directional = [e for e in resolved if e.get("correct") is not None]
         hits = sum(1 for e in directional if e["correct"])
         brier_terms = [
@@ -135,8 +136,8 @@ class PredictionLedger:
             "hits": hits,
             "hit_rate": hits / len(directional) if directional else None,
             "brier": sum(brier_terms) / len(brier_terms) if brier_terms else None,
-            "pending": sum(1 for e in self.entries if not e.get("resolved")),
-            "logged": len(self.entries),
+            "pending": sum(1 for e in entries if not e.get("resolved")),
+            "logged": len(entries),
             "horizon_min": self.horizon_min,
             "recent": recent,
         }
