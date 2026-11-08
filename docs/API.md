@@ -16,6 +16,21 @@
 WS 是纯推送：每帧就是完整的 snapshot 对象，不做增量。断线自动重连即可。
 开发时可在 URL 加 `?mock=1` 直接读取 `/mock/snapshot.json`（由前端实现）。
 
+## 1.1 静态版（GitHub Pages）
+
+在线站点没有 HTTP 服务端：`web/js/engine-worker.js` 在 Web Worker 里用 Pyodide
+加载 `py/server/*.py`，浏览器直连币安公共行情；`web/js/app-client.js` 消费同一份
+snapshot 结构并交给现有 Dashboard 渲染。相比后端快照，静态版多两个顶层字段：
+
+| 字段 | 取值 | 说明 |
+| --- | --- | --- |
+| `market` | `futures` / `spot` | 实际使用的数据源；期货接口不可达时自动回退现货 |
+| `market_label` | `USDⓈ-M PERP` / `现货 SPOT` | 用于页面诚实标注 |
+
+`feed.source` 相应为 `binance-usdm` 或 `binance-spot`；现货回退时
+`feed.note` 说明回退原因，`mark_price` / `index_price` / `funding_rate` /
+`open_interest` 为 `null`，真实强平为 0，清算带只有模型估算。
+
 ## 2. 顶层快照
 
 ```json

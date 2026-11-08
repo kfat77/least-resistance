@@ -58,11 +58,11 @@
       </div>
     </header>
 
-    <div class="ticker" id="ticker" aria-label="合约行情条">
+    <div class="ticker" id="ticker" aria-label="行情条">
       <div class="ticker-sym">
         <span class="ts-icon" id="tk-icon">₿</span>
         <span class="ts-name" id="tk-sym">BTCUSDT</span>
-        <span class="ts-perp">PERP</span>
+        <span class="ts-perp" id="tk-mkt">PERP</span>
       </div>
       <div class="ticker-price">
         <b class="num" id="tk-price">—</b>
@@ -84,7 +84,7 @@
       <div class="boot-card" id="boot-card">
         <span class="boot-ring" aria-hidden="true"></span>
         <p>建立数据链路 · CONNECTING</p>
-        <em>BINANCE USDⓈ-M PERPETUAL · WS / 900MS</em>
+        <em>BINANCE PUBLIC MARKET · WS / 900MS</em>
       </div>
 
       <div class="work-grid" id="work-grid" hidden>
@@ -163,7 +163,7 @@
             <div class="chart-head">
               <div class="ch-id">
                 <b id="ch-sym">BTCUSDT</b>
-                <span>USDⓈ-M PERP</span>
+                <span id="ch-mkt">USDⓈ-M PERP</span>
                 <em class="ch-ready" id="ch-ready">BOOK SYNC</em>
               </div>
               <div class="ch-price">
@@ -373,7 +373,9 @@
           <div>
             <h3>数据源 <em>SOURCES</em></h3>
             <p>
-              实时数据来自 Binance USDⓈ-M 永续 WS，快照约每 0.9 秒推送一次；K 线为 1m / 15m。
+              实时数据优先取自 Binance USDⓈ-M 永续；若当前网络无法访问期货接口，浏览器会自动切换
+              Binance 现货公共行情（此时无资金费率/持仓量，实际强平为 0，清算带为模型估算）。
+              快照约每 0.9 秒刷新一次，K 线为 1m / 15m。
               实际强平为交易所 forceOrder 成交（本环境常为 0 笔）；清算地图、清算燃料为基于成交分布与杠杆结构的
               <b>模型估算</b>，不代表交易所持仓数据。ETH 指标同理。
             </p>

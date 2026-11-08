@@ -8,3 +8,8 @@ data/
 .idea/
 .vscode/
 .DS_Store
+_site/
+_site_test/
+.cache/
+qa_*.py
+qa_*.html

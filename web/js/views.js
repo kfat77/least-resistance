@@ -82,19 +82,21 @@ function buildKpiStack(host, def) {
 }
 
 function sparkRow(sym, info) {
+  const marketLabel = (info && info.label) || 'PERP';
   const el = document.createElement('button');
   el.type = 'button';
   el.className = 'm-row';
   el.dataset.sym = sym;
   el.innerHTML =
-    `<span class="m-id"><i>${ICONS[sym] || '•'}</i><b>${SHORT[sym] || sym}</b><em>PERP</em></span>` +
+    `<span class="m-id"><i>${ICONS[sym] || '•'}</i><b>${SHORT[sym] || sym}</b><em data-f="mkt">${esc(marketLabel)}</em></span>` +
     `<span class="m-nums"><b data-f="price">—</b><span data-f="chg">—</span></span>` +
     `<span class="m-spark"><canvas></canvas></span>` +
     `<span class="m-tag"><b data-f="struct">—</b><span class="m-dir" data-f="dir">—</span></span>`;
-  el.setAttribute('aria-label', `${SHORT[sym] || sym} 永续合约，点击切换`);
+  el.setAttribute('aria-label', `${SHORT[sym] || sym} ${marketLabel}，点击切换`);
   return {
     el,
     refs: {
+      mkt: qs('[data-f="mkt"]', el),
       price: qs('[data-f="price"]', el),
       chg: qs('[data-f="chg"]', el),
       struct: qs('[data-f="struct"]', el),
@@ -183,7 +185,8 @@ export class Dashboard {
     const list = this.ref('market-list');
     list.innerHTML = '';
     for (const sym of ['BTCUSDT', 'ETHUSDT']) {
-      const row = sparkRow(sym);
+      const label = (this.snap && this.snap.market_label) || 'PERP';
+      const row = sparkRow(sym, { label });
       list.appendChild(row.el);
       this.market[sym] = row;
       row.spark = createChart('spark', qs('.m-spark', row.el));
@@ -493,6 +496,11 @@ export class Dashboard {
   paint() {
     const s = this.symbolData();
     if (!s) return;
+    const mkt = (this.snap && this.snap.market_label) || 'PERP';
+    const tkMkt = this.ref('tk-mkt');
+    if (tkMkt) setTxt(tkMkt, mkt);
+    const chMkt = this.ref('ch-mkt');
+    if (chMkt) setTxt(chMkt, mkt);
     this.paintTicker(s);
     this.paintHeader(s);
     this.paintChart(s);
@@ -519,10 +527,12 @@ export class Dashboard {
     setTxt(this.ref('tk-high'), fmtPrice(s.high_24h));
     setTxt(this.ref('tk-low'), fmtPrice(s.low_24h));
     setTxt(this.ref('tk-vol'), `$${fmtUsdCompact(num(s.quote_volume_24h))}`);
+    const hasFunding = s.funding_rate != null;
     const nf = s.next_funding_ts ? relZh(Number(s.next_funding_ts), Date.now()) : '—';
-    setTxt(this.ref('tk-funding'), `${fmtFunding(num(s.funding_rate))} · ${nf}`);
-    setTxt(this.ref('tk-oi'), `${fmtNum(num(s.open_interest) / 1000, 1)}K`);
-    setTxt(this.ref('tk-mark'), `${fmtPrice(s.mark_price)} / ${fmtPrice(s.index_price)}`);
+    setTxt(this.ref('tk-funding'), hasFunding ? `${fmtFunding(num(s.funding_rate))} · ${nf}` : '—');
+    setTxt(this.ref('tk-oi'), s.open_interest != null ? `${fmtNum(num(s.open_interest) / 1000, 1)}K` : '—');
+    const hasMark = s.mark_price != null && s.index_price != null;
+    setTxt(this.ref('tk-mark'), hasMark ? `${fmtPrice(s.mark_price)} / ${fmtPrice(s.index_price)}` : '—');
     setTxt(
       this.ref('tk-spread'),
       `${fmtNum(num(ob.spread_bps), 2)} bps · ${fmtPct(num(ob.imbalance_1pct) * 100, 1, true)}`
@@ -621,6 +631,9 @@ export class Dashboard {
       if (!row || !sd) continue;
       const pred = sd.prediction || {};
       const pdir = pred.direction || 'neutral';
+      if (row.refs.mkt) {
+        setTxt(row.refs.mkt, (this.snap && this.snap.market_label) || 'PERP');
+      }
       setTxt(row.refs.price, fmtPrice(sd.price));
       const rowChg = num(sd.change_24h_pct);
       setTxt(row.refs.chg, fmtPct(rowChg, 2, true));
