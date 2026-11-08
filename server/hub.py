@@ -339,7 +339,9 @@ class MarketHub:
         self._detect_spoofs(state, walls, now)
         self._detect_iceberg_events(state, icebergs, now)
 
-        components = self._components(bands, walls, liq_summary, estimated, flow, vacuum, mid)
+        components = self._components(
+            bands, walls, icebergs, liq_summary, estimated, flow, vacuum, mid, state.symbol
+        )
         prediction = self._prediction(state, components, walls, liq_summary, estimated, mid, now)
         state.ledger.resolve_due(now, price or mid)
         if prediction is not None:
@@ -388,11 +390,13 @@ class MarketHub:
         self,
         bands: dict,
         walls: dict,
+        icebergs: list[dict],
         liq_summary: dict,
         estimated: list[dict],
         flow: dict,
         vacuum: dict,
         mid: float,
+        symbol: str,
     ) -> list[dict]:
         def band_imb(dist: float) -> float:
             for band in bands.get("bands", []):
@@ -401,13 +405,13 @@ class MarketHub:
             return 0.0
 
         book_score = analytics.clamp(0.45 * band_imb(0.5) + 0.55 * band_imb(1.0))
-        wall_score, bid_block, ask_block = analytics.wall_pressure(walls, mid)
+        wall_score, bid_absorbed, ask_absorbed = analytics.wall_pressure(
+            walls, icebergs, mid, symbol
+        )
         liq_score, above, below = analytics.liquidation_pressure(liq_summary, estimated, mid)
         flow_score = analytics.clamp(flow.get("ratio", 0.0))
         vacuum_score = analytics.clamp(vacuum.get("score", 0.0))
 
-        bid_wall = walls.get("nearest_bid")
-        ask_wall = walls.get("nearest_ask")
         band_one = next((b for b in bands.get("bands", []) if abs(b["dist_pct"] - 1.0) < 1e-6), None)
         bid_1 = band_one["bid_usd"] if band_one else 0.0
         ask_1 = band_one["ask_usd"] if band_one else 0.0
@@ -423,13 +427,13 @@ class MarketHub:
             c["usd"] for c in liq_summary.get("clusters", []) if c["side"] == "long"
         )
 
-        def wall_text() -> str:
-            parts = []
-            if bid_wall:
-                parts.append(f"买墙 {_price(bid_wall['price'])}（{_usd(bid_wall['usd'])}，{bid_wall['dist_pct']:+.2f}%）")
-            if ask_wall:
-                parts.append(f"卖墙 {_price(ask_wall['price'])}（{_usd(ask_wall['usd'])}，{ask_wall['dist_pct']:+.2f}%）")
-            return "；".join(parts) if parts else "近端 1.5% 内无显著挂单墙"
+        def absorption_text() -> str:
+            if bid_absorbed <= 0 and ask_absorbed <= 0:
+                return "近 2 分钟墙/冰山无显著吸收，等待成交验证"
+            return (
+                f"近 2 分钟买侧吸收 {_usd(bid_absorbed)}"
+                f" / 卖侧吸收 {_usd(ask_absorbed)}（墙与冰山，含回补加成）"
+            )
 
         return [
             {
@@ -441,11 +445,11 @@ class MarketHub:
             },
             {
                 "key": "walls",
-                "label": "墙体阻力",
+                "label": "墙/冰山吸收",
                 "score": wall_score,
                 "weight": config.SIGNAL_WEIGHTS["walls"],
-                "detail": wall_text(),
-                "meta": {"bid_block": bid_block, "ask_block": ask_block},
+                "detail": absorption_text(),
+                "meta": {"bid_absorbed": bid_absorbed, "ask_absorbed": ask_absorbed},
             },
             {
                 "key": "liquidations",
@@ -471,7 +475,7 @@ class MarketHub:
                 "score": vacuum_score,
                 "weight": config.SIGNAL_WEIGHTS["vacuum"],
                 "detail": (
-                    f"1–2% 档挂单密度 上方 {_usd(vacuum.get('up_density', 0))}/1%"
+                    f"1.5–3% 档挂单密度 上方 {_usd(vacuum.get('up_density', 0))}/1%"
                     f" / 下方 {_usd(vacuum.get('down_density', 0))}/1%"
                 ),
             },

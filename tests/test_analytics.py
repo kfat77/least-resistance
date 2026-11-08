@@ -6,12 +6,14 @@ from server import config
 from server.analytics import (
     LiquidationBook,
     TradeTape,
+    band_metrics,
     estimate_liquidation_map,
     friction_curve,
     iceberg_metrics,
     pick_targets,
     vacuum_metrics,
     wall_metrics,
+    wall_pressure,
 )
 from server.book import OrderBook
 
@@ -164,3 +166,62 @@ def test_pick_targets_uses_nearest_magnet() -> None:
     assert result["target"] == pytest.approx(100.5)
     assert result["invalidation"] is not None
     assert result["levels"][0]["kind"] == "wall"
+
+
+def test_depth_totals_use_the_widest_band_not_the_sum_of_nested_bands() -> None:
+    bids = [["99.5", "1"], ["99.0", "1"], ["98.0", "1"], ["97.5", "1"]]
+    asks = [["100.5", "1"], ["101.0", "1"], ["102.0", "1"], ["102.5", "1"]]
+    metrics = band_metrics(_book(bids, asks))
+    assert metrics["depth_span_pct"] == pytest.approx(3.0)
+    assert metrics["bid_depth_usd"] == pytest.approx(metrics["bands"][-1]["bid_usd"])
+    assert metrics["ask_depth_usd"] == pytest.approx(metrics["bands"][-1]["ask_usd"])
+    assert metrics["bid_depth_usd"] < sum(b["bid_usd"] for b in metrics["bands"])
+
+
+def test_wall_pressure_scores_absorbed_volume_not_resting_size(monkeypatch) -> None:
+    monkeypatch.setitem(config.WALL_ABSORB_FULL_USD, BTC, 10_000.0)
+    walls = {
+        "walls": [
+            {"side": "bid", "price": 99.0, "absorbed_usd": 120_000.0, "refills": 0},
+            {"side": "ask", "price": 101.0, "absorbed_usd": 30_000.0, "refills": 0},
+        ]
+    }
+    score, bid_absorbed, ask_absorbed = wall_pressure(walls, [], 100.0, BTC)
+    assert bid_absorbed > ask_absorbed > 0
+    assert score == pytest.approx(0.6)
+
+    no_absorption = {
+        "walls": [
+            {"side": "bid", "price": 99.0, "absorbed_usd": 0.0, "refills": 0},
+            {"side": "ask", "price": 101.0, "absorbed_usd": 0.0, "refills": 0},
+        ]
+    }
+    assert wall_pressure(no_absorption, [], 100.0, BTC)[0] == 0.0
+
+
+def test_wall_pressure_skips_icebergs_already_counted_as_walls(monkeypatch) -> None:
+    monkeypatch.setitem(config.WALL_ABSORB_FULL_USD, BTC, 10_000.0)
+    walls = {
+        "walls": [
+            {"side": "bid", "price": 99.0, "absorbed_usd": 100_000.0, "refills": 0}
+        ]
+    }
+    icebergs = [
+        {"side": "bid", "price": 99.0, "absorbed_usd": 500_000.0, "refills": 3},
+        {"side": "ask", "price": 101.0, "absorbed_usd": 100_000.0, "refills": 0},
+    ]
+    score, bid_absorbed, ask_absorbed = wall_pressure(walls, icebergs, 100.0, BTC)
+    assert bid_absorbed == pytest.approx(ask_absorbed)
+    assert bid_absorbed < 200_000.0  # the 500k iceberg at 99.0 was skipped
+    assert score == pytest.approx(0.0)
+
+
+def test_vacuum_reads_outside_the_book_signal_corridor() -> None:
+    inner_bids = [[str(100.0 - i / 100), "100"] for i in range(1, 100)]
+    inner_asks = [[str(100.0 + i / 100), "100"] for i in range(1, 100)]
+    thin_asks = [[str(100.0 + i / 100), "1"] for i in range(151, 300)]
+    thick_bids = [[str(100.0 - i / 100), "50"] for i in range(151, 300)]
+    metrics = vacuum_metrics(_book(inner_bids + thick_bids, inner_asks + thin_asks))
+    assert metrics["up_density"] < metrics["down_density"]
+    assert metrics["score"] > 0.9
+

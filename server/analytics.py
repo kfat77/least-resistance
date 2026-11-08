@@ -334,13 +334,17 @@ def band_metrics(book: OrderBook) -> dict:
             }
         )
     one_pct = next((b for b in bands if abs(b["dist_pct"] - 1.0) < 1e-6), bands[0])
+    # BAND_DISTANCES are nested windows, so summing them multiplies the same
+    # resting orders. Use the widest window as the single depth total.
+    outer = bands[-1] if bands else {"dist_pct": 0.0, "bid_usd": 0.0, "ask_usd": 0.0}
     return {
         "mid": mid,
         "spread_bps": round(book.spread_bps(), 4),
         "bands": bands,
         "imbalance_1pct": one_pct["imbalance"],
-        "bid_depth_usd": sum(b["bid_usd"] for b in bands),
-        "ask_depth_usd": sum(b["ask_usd"] for b in bands),
+        "depth_span_pct": outer["dist_pct"],
+        "bid_depth_usd": outer["bid_usd"],
+        "ask_depth_usd": outer["ask_usd"],
     }
 
 
@@ -505,19 +509,21 @@ def friction_curve(
 
 
 def vacuum_metrics(book: OrderBook) -> dict:
-    """Relative thinness of the 0.5%-2% corridors above vs below."""
+    """Relative thinness of the 1.5%-3% corridors above vs below."""
     mid = book.mid()
     if mid is None:
-        return {"up_density": 0.0, "down_density": 0.0, "score": 0.0, "gap": None}
+        return {"up_density": 0.0, "down_density": 0.0, "score": 0.0, "gap_pct": 0.0}
+    width = config.VACUUM_HIGH - config.VACUUM_LOW
+
     def density(direction: int) -> float:
-        low = mid * (1 + direction * 0.005)
-        high = mid * (1 + direction * 0.02)
+        low = mid * (1 + direction * config.VACUUM_LOW)
+        high = mid * (1 + direction * config.VACUUM_HIGH)
         levels = book.asks if direction > 0 else book.bids
         total = 0.0
         for price, qty in levels.items():
             if min(low, high) <= price <= max(low, high):
                 total += price * qty
-        return total / 0.015
+        return total / width
     up = density(1)
     down = density(-1)
     total = up + down
@@ -530,20 +536,49 @@ def vacuum_metrics(book: OrderBook) -> dict:
     }
 
 
-def wall_pressure(walls: dict, mid: float) -> tuple[float, float, float]:
-    """Distance-weighted blocking strength of bid walls below vs ask walls above."""
-    ask_block = bid_block = 0.0
-    for wall in walls.get("walls", []):
-        dist = abs(wall["dist_pct"]) / 100.0
+def wall_pressure(
+    walls: dict, icebergs: list[dict], mid: float, symbol: str
+) -> tuple[float, float, float]:
+    """Absorbed-volume asymmetry at wall and iceberg levels.
+
+    Resting size is already scored by ``band_metrics``; counting it again here
+    would double-weight the same depth. This score instead asks which side's
+    large orders have actually absorbed aggressive flow, with a small bonus for
+    levels that keep refilling after being hit. Absolute absorbed volume scales
+    the score so one small print cannot saturate the component.
+    """
+    absorbed = {"bid": 0.0, "ask": 0.0}
+    seen: set[tuple[str, float]] = set()
+
+    def add(order: dict, side: str, price: float) -> None:
+        dist = abs(price - mid) / mid if mid else 0.0
+        if dist > config.WALL_SCAN_RANGE:
+            return
         weight = 1.0 / (1.0 + dist * 220.0)
-        strength = wall["usd"] * weight
-        if wall["side"] == "ask":
-            ask_block += strength
-        else:
-            bid_block += strength
-    total = ask_block + bid_block
-    score = (bid_block - ask_block) / total if total > 0 else 0.0
-    return score, bid_block, ask_block
+        refills = min(int(order.get("refills", 0)), 6)
+        absorbed[side] += order.get("absorbed_usd", 0.0) * weight * (1.0 + 0.15 * refills)
+
+    for wall in walls.get("walls", []):
+        side = wall["side"]
+        price = float(wall["price"])
+        seen.add((side, round(price, 8)))
+        add(wall, side, price)
+    for ice in icebergs:
+        side = ice["side"]
+        price = float(ice["price"])
+        if (side, round(price, 8)) in seen:
+            continue
+        add(ice, side, price)
+
+    bid_absorbed = absorbed["bid"]
+    ask_absorbed = absorbed["ask"]
+    total = bid_absorbed + ask_absorbed
+    if total <= 0:
+        return 0.0, 0.0, 0.0
+    full = config.WALL_ABSORB_FULL_USD[symbol]
+    conviction = min(1.0, total / full)
+    score = clamp((bid_absorbed - ask_absorbed) / total * conviction)
+    return score, bid_absorbed, ask_absorbed
 
 
 def liquidation_pressure(

@@ -227,7 +227,7 @@ export const KIND_EN = {
 
 export const SIGNAL_KEY_TEXT = {
   book: '盘口失衡',
-  walls: '墙体阻力',
+  walls: '墙/冰山吸收',
   liquidations: '清算燃料',
   flow: '主动流',
   vacuum: '流动性真空',

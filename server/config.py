@@ -51,6 +51,10 @@ WALL_MEDIAN_MULT = 9.0
 WALL_SCAN_RANGE = 0.015
 WALL_MAX_PER_SIDE = 5
 
+# Absorbed volume that counts as full conviction for the wall/iceberg signal.
+# Without this cap a single small absorption would saturate the component at +/-1.
+WALL_ABSORB_FULL_USD = {"BTCUSDT": 2_000_000.0, "ETHUSDT": 600_000.0}
+
 # Iceberg / hidden liquidity: an aggressed level that keeps refilling and whose
 # traded notional over the window dwarfs the displayed size.
 ICEBERG_TRADE_WINDOW_S = 120.0
@@ -96,11 +100,16 @@ LARGE_TRADE_LIMIT = 24
 # Each component returns a score in [-1, 1]; positive means up is cheaper.
 SIGNAL_WEIGHTS = {
     "book": 0.30,       # resting liquidity asymmetry inside +/-1%
-    "walls": 0.24,      # strength of the nearest real walls each side
+    "walls": 0.24,      # absorbed volume at walls / icebergs (not resting size)
     "liquidations": 0.22,  # liquidation magnets / fuel above vs below
     "flow": 0.14,       # taker aggression (5m)
-    "vacuum": 0.10,     # thin-liquidity corridors in the 0.5-2% band
+    "vacuum": 0.10,     # thin-liquidity corridors in the 1.5-3% band
 }
+# The three book-derived signals deliberately read different price corridors so
+# they do not all count the same resting depth: book inside +/-1%, wall/iceberg
+# absorption at the levels themselves, vacuum outside the wall scan range.
+VACUUM_LOW = 0.015
+VACUUM_HIGH = 0.03
 PREDICTION_HORIZON_MIN = 15
 PREDICTION_INTERVAL_S = 60.0
 PREDICTION_DIRECTION_THRESHOLD = 0.07

@@ -103,6 +103,8 @@ snapshot 结构并交给现有 Dashboard 渲染。相比后端快照，静态版
 ```
 
 - `bands`：按距离档位（0.25%/0.5%/1%/2%/3%）累计的买卖挂单美元。
+- `bid_depth_usd` / `ask_depth_usd`：最外层 ±3% 窗口的累计深度；档位是嵌套的，
+  不要把这几个 `bands` 相加。
 - `ladder`：贴近盘口的 28 档，`cum_usd` 从盘口向外累计；**画订单簿梯图用这个**。
 - `profile`：−3%~+3% 的 96 个价格箱，买卖挂单堆积（上下挂单堆积量）。`price` 是箱中心。
 - `walls`：显著挂单墙（阈值随币种，最多每边 5 个），`kind` = `iceberg` | `resting` | `spoof`。
@@ -148,10 +150,12 @@ snapshot 结构并交给现有 Dashboard 渲染。相比后端快照，静态版
 
 `signals`：5 个分量，`score` ∈ [−1,1]，正数表示该维度支持上行（阻力更小）。
 `prediction.score` 是加权和；`direction` = `up|down|neutral`（阈值 ±0.07）。
+`book` 读 ±1% 静态深度；`walls` 读墙/冰山在近 2 分钟被主动成交吸收的方向；
+`vacuum` 读 1.5–3% 外侧密度——三者使用不同证据与价格区间，不重复计分。
 
 ```json
-{"key": "walls", "label": "墙体阻力", "score": 0.0821, "weight": 0.24,
- "contribution": 0.0197, "detail": "买墙 76,044.90（$1.32M，-0.07%）；卖墙 76,115.70（$1.33M，+0.03%）"}
+{"key": "walls", "label": "墙/冰山吸收", "score": 0.0821, "weight": 0.24,
+ "contribution": 0.0197, "detail": "近 2 分钟买侧吸收 $1.32M / 卖侧吸收 $1.10M（墙与冰山，含回补加成）"}
 ```
 
 ### 3.5 `prediction`
