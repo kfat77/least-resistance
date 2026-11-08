@@ -76,7 +76,9 @@ def build(out: Path, download: bool) -> None:
     out.mkdir(parents=True)
 
     for name in TREE_DIRS:
-        shutil.copytree(WEB / name, out / name)
+        src = WEB / name
+        if src.is_dir():
+            shutil.copytree(src, out / name)
 
     index = (WEB / "index.html").read_text(encoding="utf-8")
     if "./js/app.js" not in index:
