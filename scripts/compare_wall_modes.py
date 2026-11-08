@@ -12,12 +12,18 @@ import json
 import sys
 import urllib.request
 
-MIN_SAMPLES = 20
+MIN_WINDOWS = 20
+MIN_BRIER_GAIN = 0.02
 
 
 def fetch(url: str) -> dict:
     with urllib.request.urlopen(url, timeout=8) as response:
         return json.load(response)
+
+
+def _resolved(stats: dict) -> int:
+    """Resolved windows: Brier is computed over these, including neutral forecasts."""
+    return max(0, int(stats.get("logged") or 0) - int(stats.get("pending") or 0))
 
 
 def _fmt(stats: dict) -> str:
@@ -27,27 +33,40 @@ def _fmt(stats: dict) -> str:
     rate_text = f"{rate * 100:.1f}%" if rate is not None else "—"
     brier_text = f"{brier:.4f}" if brier is not None else "—"
     return (
-        f"{stats.get('wall_mode', '?'):7s} samples={samples:3d} "
-        f"hit_rate={rate_text:>6s} brier={brier_text:>7s} "
-        f"pending={stats.get('pending', 0):2d}"
+        f"{stats.get('wall_mode', '?'):7s} windows={_resolved(stats):3d} "
+        f"dir_samples={samples:3d} hit_rate={rate_text:>6s} "
+        f"brier={brier_text:>7s} pending={stats.get('pending', 0):2d}"
     )
 
 
-def decide(barrier: dict, magnet: dict, min_samples: int = MIN_SAMPLES) -> str:
-    b_samples = barrier.get("samples") or 0
-    m_samples = magnet.get("samples") or 0
-    if b_samples < min_samples or m_samples < min_samples:
+def decide(active: dict, shadow: dict, min_windows: int = MIN_WINDOWS) -> str:
+    a_windows = _resolved(active)
+    s_windows = _resolved(shadow)
+    if a_windows < min_windows or s_windows < min_windows:
         return (
-            f"样本不足（barrier {b_samples}/{min_samples}, magnet {m_samples}/{min_samples}），"
-            "暂不切换默认值"
+            f"样本不足（{active.get('wall_mode')} {a_windows}/{min_windows}, "
+            f"{shadow.get('wall_mode')} {s_windows}/{min_windows}），暂不切换默认值"
         )
-    b_brier = barrier.get("brier")
-    m_brier = magnet.get("brier")
-    if b_brier is None or m_brier is None:
+    a_brier = active.get("brier")
+    s_brier = shadow.get("brier")
+    if a_brier is None or s_brier is None:
         return "Brier 缺失，暂不切换"
-    winner = "barrier" if b_brier < m_brier else "magnet"
-    delta = abs(b_brier - m_brier)
-    return f"Brier 更低者: {winner}（差距 {delta:.4f}）"
+    winner, loser = (active, shadow) if a_brier < s_brier else (shadow, active)
+    delta = abs(a_brier - s_brier)
+    if delta < MIN_BRIER_GAIN:
+        return (
+            f"Brier 差距仅 {delta:.4f} < {MIN_BRIER_GAIN:.2f}，"
+            "不足以证明优势，保留 barrier"
+        )
+    w_rate, l_rate = winner.get("hit_rate"), loser.get("hit_rate")
+    if w_rate is not None and l_rate is not None and w_rate < l_rate:
+        return f"Brier 更低但赢家命中率更差（{w_rate:.1%} vs {l_rate:.1%}），保留 barrier"
+    return (
+        f"采用 {winner.get('wall_mode')} 为默认值：Brier {winner.get('brier'):.4f} vs "
+        f"{loser.get('brier'):.4f}（差 {delta:.4f}），"
+        f"命中率 {w_rate if w_rate is None else f'{w_rate:.1%}'} vs "
+        f"{l_rate if l_rate is None else f'{l_rate:.1%}'}"
+    )
 
 
 def _pool(rows: list[dict]) -> dict:
@@ -84,10 +103,10 @@ def main() -> None:
     parser.add_argument("--url", default="http://127.0.0.1:8765/api/snapshot")
     parser.add_argument("--json", action="store_true", help="emit raw machine-readable rows")
     parser.add_argument(
-        "--min-samples",
+        "--min-windows",
         type=int,
-        default=MIN_SAMPLES,
-        help="resolved directional samples required on each side before deciding",
+        default=MIN_WINDOWS,
+        help="resolved prediction windows required on each side before deciding",
     )
     args = parser.parse_args()
 
@@ -109,7 +128,7 @@ def main() -> None:
         print(f"\n{symbol}")
         print("  " + _fmt(active))
         print("  " + _fmt(shadow))
-        print("  " + decide(active, shadow, args.min_samples))
+        print("  " + decide(active, shadow, args.min_windows))
     if args.json:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
         return
@@ -119,7 +138,7 @@ def main() -> None:
     print("\nPOOLED（两个币合计）")
     print("  " + _fmt(pooled_active))
     print("  " + _fmt(pooled_shadow))
-    print("  " + decide(pooled_active, pooled_shadow, args.min_samples * 2))
+    print("  " + decide(pooled_active, pooled_shadow, args.min_windows * 2))
 
 
 if __name__ == "__main__":

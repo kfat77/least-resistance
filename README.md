@@ -111,9 +111,22 @@ A/B 仍会积累样本；静态站则由浏览器内的 Worker 每 900ms 推进�
 - 切换：`python run.py --mode live --wall-mode magnet`，或设置环境变量
   `WALL_MODE=magnet`（仅接受 `barrier` / `magnet`，非法值启动即报错）。
 - 对比：`python scripts/compare_wall_modes.py --url http://127.0.0.1:8765/api/snapshot`。
-- 决策规则：两种模式各累计至少 20 条已结算样本后，Brier 更低者胜出；样本不足时
-  保留 `barrier` 作为默认值。结果字段见 [docs/API.md](docs/API.md)（`accuracy_ab`
-  与 `accuracy_alt_ab`）。
+- 决策规则：两种模式各累计至少 20 条已结算窗口（Brier 按全部已结算窗口计算，
+  方向命中率作为辅助指标）；若一方 Brier 至少低 0.02 且命中率不更差，则采用该模式
+  为默认值，否则保留 `barrier`（避免把样本噪声当成优势）。结果字段见
+  [docs/API.md](docs/API.md)（`accuracy_ab` 与 `accuracy_alt_ab`）。
+
+本次实测（2026-11-09 06:19 UTC+8，live 服务器本次进程启动后的 A/B）：
+
+| 范围 | 已结算窗口 | 方向样本 | barrier 命中率 / Brier | magnet 命中率 / Brier |
+| --- | --- | --- | --- | --- |
+| BTCUSDT | 20 | 6 | 33.3% / 0.2560 | 16.7% / 0.2639 |
+| ETHUSDT | 20 | 17 | 76.5% / 0.2101 | 76.5% / 0.2101 |
+| 合计 | 40 | 23 | 65.2% / 0.2330 | 60.9% / 0.2370 |
+
+合计 Brier 差距 0.0040，小于 0.02 的决策门槛，因此按规则**保留 `barrier` 为默认**。
+15 分钟视界与 60 秒记录频率使相邻预测窗口高度重叠，当前样本量只够做阶段性判断，
+服务端会继续并行记账，后续可用同一脚本复查。
 
 ## 项目结构
 
