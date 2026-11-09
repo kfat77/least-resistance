@@ -227,7 +227,7 @@ export class Dashboard {
     /* signal mini rows */
     const sig = this.ref('sig-mini');
     sig.innerHTML = '';
-    for (const key of ['book', 'walls', 'liquidations', 'flow', 'vacuum']) {
+    for (const key of ['sweep', 'flow', 'absorption', 'liquidations', 'vacuum']) {
       const row = document.createElement('div');
       row.className = 'sig-mini-row';
       row.innerHTML =
@@ -620,40 +620,49 @@ export class Dashboard {
   }
 
   paintLeft(s) {
-    const ob = s.orderbook || {};
-    const bid = num(ob.bid_depth_usd);
-    const ask = num(ob.ask_depth_usd);
-    const total = bid + ask;
+    const sweep = s.sweep || {};
+    const above = num(sweep.above_usd);
+    const below = num(sweep.below_usd);
+    const total = above + below;
     if (!total) {
       setTxt(this.ref('rs-bid'), '—');
       setTxt(this.ref('rs-ask'), '—');
-      setTxt(this.ref('rs-verdict'), '等待盘口数据…');
+      setTxt(this.ref('rs-verdict'), '等待流动性数据…');
       return;
     }
-    const bias = (bid - ask) / total;
-    const norm = clamp(bias * 20, -1, 1);
-    setTxt(this.ref('rs-bid'), `$${fmtUsdCompact(bid)}`);
-    setTxt(this.ref('rs-ask'), `$${fmtUsdCompact(ask)}`);
-    const pct = 50 + norm * 50;
+    const score = num(sweep.score);
+    const norm = clamp(score * 1.8, -1, 1);
+    setTxt(this.ref('rs-bid'), `$${fmtUsdCompact(above)}`);
+    setTxt(this.ref('rs-ask'), `$${fmtUsdCompact(below)}`);
+    const abovePct = (above / total) * 100;
     const bBar = this.ref('rs-bar-b');
     const aBar = this.ref('rs-bar-a');
-    if (bBar) bBar.style.width = `${pct.toFixed(2)}%`;
-    if (aBar) aBar.style.width = `${(100 - pct).toFixed(2)}%`;
+    if (bBar) bBar.style.width = `${(100 - abovePct).toFixed(2)}%`;
+    if (aBar) aBar.style.width = `${abovePct.toFixed(2)}%`;
 
     const needle = this.ref('rs-needle');
     if (needle) needle.setAttribute('transform', `rotate(${(norm * 62).toFixed(2)} 100 84)`);
     const arc = this.ref('rs-needle-arc');
     if (arc) {
       const half = 135;
-      const len = Math.min(half, Math.abs(bias) * 20 * half);
+      const nAbs = Math.abs(norm);
+      const len = Math.min(half, nAbs * half);
       arc.style.stroke = norm >= 0 ? 'var(--up)' : 'var(--down)';
       arc.setAttribute('stroke-dasharray', `${len.toFixed(1)} 999`);
       arc.setAttribute('stroke-dashoffset', String(norm >= 0 ? -half : -(half - len)));
     }
     const verdict = this.ref('rs-verdict');
-    const dir = norm > 0.12 ? 'up' : norm < -0.12 ? 'down' : 'neutral';
-    const label = dir === 'up' ? '买盘更厚 · 上行阻力更小' : dir === 'down' ? '卖盘更厚 · 下行阻力更小' : '两侧挂单接近均衡';
-    setHTML(verdict, `${label} <em>${dir === 'up' ? 'UP RESISTANCE LOWER' : dir === 'down' ? 'DOWN RESISTANCE LOWER' : 'BALANCED'}</em>`);
+    const dir = score > 0.12 ? 'up' : score < -0.12 ? 'down' : 'neutral';
+    const label =
+      dir === 'up'
+        ? '上方流动性更厚 · 倾向向上扫荡'
+        : dir === 'down'
+          ? '下方流动性更厚 · 倾向向下扫荡'
+          : '两侧可扫荡流动性接近';
+    setHTML(
+      verdict,
+      `${label} <em>${dir === 'up' ? 'UPSIDE SWEEP' : dir === 'down' ? 'DOWNSIDE SWEEP' : 'BALANCED'}</em>`
+    );
     const tag = this.ref('bias-tag');
     if (tag) {
       setTxt(tag, `${DIR_TEXT[dir]} ${DIR_ARROW[dir]}`);
@@ -870,6 +879,11 @@ export class Dashboard {
   paintPred(s) {
     const pred = s.prediction || {};
     const dir = pred.direction || 'neutral';
+    const rail = this.ref('pred-rail');
+    if (rail) {
+      rail.title = pred.narrative || '';
+      rail.setAttribute('aria-label', pred.narrative || '最小阻力方向与预测');
+    }
     const pill = this.ref('pd-pill');
     if (pill) {
       setHTML(pill, `${DIR_TEXT[dir]} ${DIR_ARROW[dir]} <em>${DIR_EN[dir]}</em>`);

@@ -99,16 +99,38 @@ LARGE_TRADE_LIMIT = 24
 # least-resistance model
 # ---------------------------------------------------------------------------
 # Each component returns a score in [-1, 1]; positive means up is cheaper.
+#
+# The primary thesis is a liquidity sweep: price is drawn toward the side with
+# more executable liquidity because that is where stops, resting size and
+# liquidation pools can absorb / trigger flow.  "sweep" weights resting depth,
+# hidden iceberg size, the forward liquidation map and realized liquidation
+# clusters above vs below mid.  The remaining components describe the path and
+# the trigger, not the destination.
 SIGNAL_WEIGHTS = {
-    "book": 0.30,       # resting liquidity asymmetry inside +/-1%
-    "walls": 0.24,      # absorbed volume at walls / icebergs (not resting size)
-    "liquidations": 0.22,  # liquidation magnets / fuel above vs below
-    "flow": 0.14,       # taker aggression (5m)
-    "vacuum": 0.10,     # thin-liquidity corridors in the 1.5-3% band
+    "sweep": 0.68,          # weighted liquidity pools above vs below (thesis)
+    "flow": 0.14,           # taker aggression (5m)
+    "absorption": 0.08,     # absorbed volume at walls / icebergs (trigger)
+    "liquidations": 0.05,   # realized forced-order flow (trigger)
+    "vacuum": 0.05,         # thin-liquidity corridors in the 1.5-3% band (path)
 }
-# The three book-derived signals deliberately read different price corridors so
-# they do not all count the same resting depth: book inside +/-1%, wall/iceberg
-# absorption at the levels themselves, vacuum outside the wall scan range.
+# Liquidity-sweep aggregation.  Every pool is decayed by distance so a wall 3%
+# away cannot outweigh the depth that price can actually reach in one horizon.
+# Each source is normalized by its own above/below total before mixing, so the
+# forward liquidation map (a model with a much larger unit scale) cannot drown
+# real book depth; these weights express trust, not dollar size.
+SWEEP_DECAY_PCT = 0.012
+SWEEP_GAIN = 2.5            # emphasises moderate pool asymmetry without clipping
+SWEEP_SOURCE_WEIGHTS = {
+    "book": 0.45,
+    "iceberg": 0.15,
+    "liq_model": 0.25,
+    "liq_actual": 0.15,
+}
+SWEEP_FULL_USD = {"BTCUSDT": 8_000_000.0, "ETHUSDT": 3_000_000.0}
+SWEEP_POOL_LIMIT = 12
+# Realized forced-order flow over this window.  Short liquidations are forced
+# buys (push up), long liquidations are forced sells (push down).
+LIQ_FLOW_WINDOW_S = 300.0
 VACUUM_LOW = 0.015
 VACUUM_HIGH = 0.03
 

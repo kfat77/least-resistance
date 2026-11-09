@@ -226,10 +226,10 @@ export const KIND_EN = {
 };
 
 export const SIGNAL_KEY_TEXT = {
-  book: '盘口失衡',
-  walls: '墙/冰山吸收',
-  liquidations: '清算燃料',
-  flow: '主动流',
+  sweep: '流动性扫荡',
+  flow: '主动成交流',
+  absorption: '墙/冰山吸收',
+  liquidations: '已实现清算流',
   vacuum: '流动性真空',
 };
 

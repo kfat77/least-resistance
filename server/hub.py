@@ -398,19 +398,24 @@ class MarketHub:
         flow = state.tape.flow(now)
         friction = analytics.friction_curve(book)
         vacuum = analytics.vacuum_metrics(book)
+        sweep = analytics.liquidity_sweep(
+            book, icebergs, liq_summary, estimated, mid, state.symbol
+        )
 
         self._detect_spoofs(state, walls, now)
         self._detect_iceberg_events(state, icebergs, now)
 
         components = self._components(
-            bands, walls, icebergs, liq_summary, estimated, flow, vacuum, mid, state.symbol,
+            sweep, walls, icebergs, liq_summary, flow, vacuum, mid, state.symbol,
             self.wall_mode,
         )
         shadow_components = self._components(
-            bands, walls, icebergs, liq_summary, estimated, flow, vacuum, mid, state.symbol,
+            sweep, walls, icebergs, liq_summary, flow, vacuum, mid, state.symbol,
             self.wall_mode_alt,
         )
-        prediction = self._prediction(state, components, walls, liq_summary, estimated, mid, now)
+        prediction = self._prediction(
+            state, components, sweep, walls, liq_summary, estimated, mid, now
+        )
         shadow_prediction = self._shadow_prediction(shadow_components)
         state.ledger.resolve_due(now, price or mid)
         state.shadow_ledger.resolve_due(now, price or mid)
@@ -443,6 +448,7 @@ class MarketHub:
                     "estimated_note": "由 24h 成交量分布 × 杠杆结构反推的估算值，非交易所持仓数据",
                 },
                 "flow": flow,
+                "sweep": sweep,
                 "friction": friction,
                 "signals": self._signals(components),
                 "prediction": prediction,
@@ -471,45 +477,40 @@ class MarketHub:
     # -- analytics composition -----------------------------------------
     def _components(
         self,
-        bands: dict,
+        sweep: dict,
         walls: dict,
         icebergs: list[dict],
         liq_summary: dict,
-        estimated: list[dict],
         flow: dict,
         vacuum: dict,
         mid: float,
         symbol: str,
         wall_mode: str,
     ) -> list[dict]:
-        def band_imb(dist: float) -> float:
-            for band in bands.get("bands", []):
-                if abs(band["dist_pct"] - dist) < 1e-6:
-                    return band["imbalance"]
-            return 0.0
-
-        book_score = analytics.clamp(0.45 * band_imb(0.5) + 0.55 * band_imb(1.0))
+        sweep_score = analytics.clamp(sweep.get("score", 0.0))
         wall_score, bid_absorbed, ask_absorbed = analytics.wall_pressure(
             walls, icebergs, mid, symbol, wall_mode
         )
-        liq_score, above, below = analytics.liquidation_pressure(liq_summary, estimated, mid)
+        liq_flow = liq_summary.get("flow", {})
+        liq_score = analytics.clamp(liq_flow.get("score", 0.0))
         flow_score = analytics.clamp(flow.get("ratio", 0.0))
         vacuum_score = analytics.clamp(vacuum.get("score", 0.0))
 
-        band_one = next((b for b in bands.get("bands", []) if abs(b["dist_pct"] - 1.0) < 1e-6), None)
-        bid_1 = band_one["bid_usd"] if band_one else 0.0
-        ask_1 = band_one["ask_usd"] if band_one else 0.0
-        imb_1 = band_one["imbalance"] if band_one else 0.0
-        liq_above = sum(
-            level["short_usd"] for level in estimated if level["price"] > mid
-        ) + sum(
-            c["usd"] for c in liq_summary.get("clusters", []) if c["side"] == "short"
-        )
-        liq_below = sum(
-            level["long_usd"] for level in estimated if level["price"] < mid
-        ) + sum(
-            c["usd"] for c in liq_summary.get("clusters", []) if c["side"] == "long"
-        )
+        source_text = {
+            "book": "挂单",
+            "iceberg": "冰山",
+            "liq_model": "估算清算",
+            "liq_actual": "已实现清算",
+        }
+        target = sweep.get("target")
+        if target:
+            sweep_detail = (
+                f"上方 {_usd(sweep['above_usd'])} / 下方 {_usd(sweep['below_usd'])} "
+                f"距离加权流动性；最厚目标 {_price(target['price'])} "
+                f"{source_text.get(target['source'], '流动性')}（{_usd(target['usd'])}）"
+            )
+        else:
+            sweep_detail = "盘口暂无足够可扫荡流动性"
 
         def absorption_text() -> str:
             if bid_absorbed <= 0 and ask_absorbed <= 0:
@@ -519,29 +520,28 @@ class MarketHub:
                 f" / 卖侧吸收 {_usd(ask_absorbed)}（墙与冰山，含回补加成）"
             )
 
+        long_liq = float(liq_flow.get("long_usd", 0.0))
+        short_liq = float(liq_flow.get("short_usd", 0.0))
+        if long_liq <= 0 and short_liq <= 0:
+            liq_detail = "近 5 分钟无已实现强平（forceOrder 缺失时该信号为 0）"
+        else:
+            liq_detail = (
+                f"近 5 分钟空头清算 {_usd(short_liq)}（强制买 / 向上）"
+                f" / 多头清算 {_usd(long_liq)}（强制卖 / 向下）"
+            )
+
         return [
             {
-                "key": "book",
-                "label": "挂单失衡",
-                "score": book_score,
-                "weight": config.SIGNAL_WEIGHTS["book"],
-                "detail": f"±1% 挂单 买 {_usd(bid_1)} / 卖 {_usd(ask_1)}，失衡 {imb_1 * 100:+.1f}%",
-            },
-            {
-                "key": "walls",
-                "label": "墙/冰山吸收",
-                "score": wall_score,
-                "weight": config.SIGNAL_WEIGHTS["walls"],
-                "detail": absorption_text(),
-                "meta": {"bid_absorbed": bid_absorbed, "ask_absorbed": ask_absorbed},
-            },
-            {
-                "key": "liquidations",
-                "label": "清算燃料",
-                "score": liq_score,
-                "weight": config.SIGNAL_WEIGHTS["liquidations"],
-                "detail": f"上方空头清算 {_usd(liq_above)} / 下方多头清算 {_usd(liq_below)}",
-                "meta": {"above": above, "below": below},
+                "key": "sweep",
+                "label": "流动性扫荡",
+                "score": sweep_score,
+                "weight": config.SIGNAL_WEIGHTS["sweep"],
+                "detail": sweep_detail,
+                "meta": {
+                    "above_usd": sweep.get("above_usd", 0.0),
+                    "below_usd": sweep.get("below_usd", 0.0),
+                    "target": target,
+                },
             },
             {
                 "key": "flow",
@@ -552,6 +552,22 @@ class MarketHub:
                     f"5 分钟主动买 {_usd(flow.get('buy_usd', 0))} / 卖 {_usd(flow.get('sell_usd', 0))}"
                     f"，净额 {flow.get('ratio', 0) * 100:+.1f}%"
                 ),
+            },
+            {
+                "key": "absorption",
+                "label": "墙/冰山吸收",
+                "score": wall_score,
+                "weight": config.SIGNAL_WEIGHTS["absorption"],
+                "detail": absorption_text(),
+                "meta": {"bid_absorbed": bid_absorbed, "ask_absorbed": ask_absorbed},
+            },
+            {
+                "key": "liquidations",
+                "label": "已实现清算流",
+                "score": liq_score,
+                "weight": config.SIGNAL_WEIGHTS["liquidations"],
+                "detail": liq_detail,
+                "meta": {"long_usd": long_liq, "short_usd": short_liq},
             },
             {
                 "key": "vacuum",
@@ -608,6 +624,7 @@ class MarketHub:
         self,
         state: SymbolState,
         components: list[dict],
+        sweep: dict,
         walls: dict,
         liq_summary: dict,
         estimated: list[dict],
@@ -615,10 +632,12 @@ class MarketHub:
         now: float,
     ) -> dict:
         score, p_up, direction, confidence = self._composite(components)
-        targets = analytics.pick_targets(direction, mid, walls, estimated, liq_summary)
+        targets = analytics.pick_targets(
+            direction, mid, walls, estimated, liq_summary, sweep.get("target")
+        )
         levels = targets["levels"]
         narrative = self._narrative(
-            state, direction, score, p_up, components, walls, targets, mid
+            state, direction, score, p_up, components, sweep, walls, targets, mid
         )
         return {
             "direction": direction,
@@ -640,6 +659,7 @@ class MarketHub:
         score: float,
         p_up: float,
         components: list[dict],
+        sweep: dict,
         walls: dict,
         targets: dict,
         mid: float,
@@ -648,22 +668,27 @@ class MarketHub:
         bid_wall = walls.get("nearest_bid")
         ask_wall = walls.get("nearest_ask")
         levels = targets["levels"]
+        above = sweep.get("above_usd", 0.0)
+        below = sweep.get("below_usd", 0.0)
+        sweep_score = sweep.get("score", 0.0)
         if direction == "neutral":
             low = mid * 0.997
             high = mid * 1.003
             return (
-                f"多空阻力接近平衡（得分 {score:+.2f}）："
-                f"买墙 {_usd(bid_wall['usd']) if bid_wall else '$0'} 对卖墙 "
-                f"{_usd(ask_wall['usd']) if ask_wall else '$0'}，"
+                f"上下可扫荡流动性接近平衡（得分 {score:+.2f}）："
+                f"上方 {_usd(above)} 对下方 {_usd(below)}，"
                 f"5 分钟主动成交净额 {next((c['score'] for c in components if c['key'] == 'flow'), 0.0) * 100:+.1f}%。"
                 f"价格倾向在 {_price(low)} – {_price(high)} 区间被来回吸附，"
-                f"等待一侧挂单被吃穿后再确认方向。"
+                f"等待一侧流动性被扫穿后再确认方向。"
             )
         if direction == "up":
-            lead = "最小阻力向上"
+            if sweep_score >= -0.005:
+                lead = "流动性扫荡向上"
+            else:
+                lead = "流动性池仍偏下方，但主动成交与吸收偏多，价格倾向向上试探"
             if levels:
                 first = levels[0]
-                lead += f"：{_price(first['price'])} 的{first['label']}（{_usd(first['usd'])}）是第一磁吸位"
+                lead += f"：上方最厚池 {_price(first['price'])}（{_usd(first['usd'])}）是首要扫荡目标"
             else:
                 lead += "：上方 0.5–2% 挂单稀薄，倾向缓步上探"
             support = ""
@@ -674,10 +699,13 @@ class MarketHub:
             invalid = targets["invalidation"]
             tail = f"{support}，跌破 {_price(invalid)} 则上行结构失效。" if support else f"跌破 {_price(invalid)} 则上行结构失效。"
         else:
-            lead = "最小阻力向下"
+            if sweep_score <= 0.005:
+                lead = "流动性扫荡向下"
+            else:
+                lead = "流动性池仍偏上方，但主动成交与吸收偏空，价格倾向向下试探"
             if levels:
                 first = levels[0]
-                lead += f"：{_price(first['price'])} 的{first['label']}（{_usd(first['usd'])}）是第一磁吸位"
+                lead += f"：下方最厚池 {_price(first['price'])}（{_usd(first['usd'])}）是首要扫荡目标"
             else:
                 lead += "：下方 0.5–2% 挂单稀薄，倾向缓步下探"
             resistance = ""
@@ -687,7 +715,10 @@ class MarketHub:
                 )
             invalid = targets["invalidation"]
             tail = f"{resistance}，站回 {_price(invalid)} 则下行结构失效。" if resistance else f"站回 {_price(invalid)} 则下行结构失效。"
-        return f"{lead}；{tail} 综合得分 {score:+.2f}，{horizon} 分钟上行概率 {p_up:.0%}。"
+        return (
+            f"{lead}；可扫荡流动性 上方 {_usd(above)} / 下方 {_usd(below)}；"
+            f"{tail} 综合得分 {score:+.2f}，{horizon} 分钟上行概率 {p_up:.0%}。"
+        )
 
     # -- alerts ---------------------------------------------------------
     def _add_event(self, kind: str, symbol: str, **fields) -> None:

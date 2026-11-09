@@ -51,6 +51,8 @@ def test_snapshot_has_both_symbols_and_serializes(tmp_path, monkeypatch) -> None
         assert len(data["orderbook"]["ladder"]["bids"]) <= config.BOOK_LEVELS_SHOWN
         assert data["orderbook"]["profile"]
         assert set(data["flow"]) >= {"buy_usd", "sell_usd", "delta_usd", "cvd"}
+        assert set(data["sweep"]) >= {"score", "above_usd", "below_usd", "pools"}
+        assert [s["key"] for s in data["signals"]] == list(config.SIGNAL_WEIGHTS)
         assert data["prediction"]["direction"] in {"up", "down", "neutral"}
         assert data["accuracy"]["horizon_min"] == config.PREDICTION_HORIZON_MIN
         assert data["accuracy"]["wall_mode"] == config.WALL_MODE

@@ -53,7 +53,7 @@ snapshot 结构并交给现有 Dashboard 渲染。相比后端快照，静态版
   "model": {
     "name": "least-resistance",
     "horizon_min": 15,
-    "weights": { "book": 0.3, "walls": 0.24, "liquidations": 0.22, "flow": 0.14, "vacuum": 0.1 },
+    "weights": { "sweep": 0.68, "flow": 0.14, "absorption": 0.08, "liquidations": 0.05, "vacuum": 0.05 },
     "wall_mode": "barrier",
     "wall_mode_alt": "magnet",
     "wall_modes": ["barrier", "magnet"],
@@ -138,7 +138,7 @@ snapshot 结构并交给现有 Dashboard 渲染。相比后端快照，静态版
 ```
 
 - `total_*` / `recent` / `map` / `clusters`：交易所真实强平（WS `forceOrder`，可能为空）。
-- `estimated`：按价格区间的**多空清算量估算**（96 档，覆盖当前价附近 ±4%）；heatmap 用它。
+- `estimated`：按价格区间的**多空清算量估算**（96 档，覆盖当前价附近 ±6%）；heatmap 用它。
 - UI 必须区分“实际强平”与“模型估算”，不要把估算标成实际。
 
 ### 3.3 `flow`
@@ -154,7 +154,27 @@ snapshot 结构并交给现有 Dashboard 渲染。相比后端快照，静态版
 
 `ratio` ∈ [−1,1] 主动买卖净额占比；`cvd` 是 10 秒桶累计成交差（USD），前端画折线。
 
-### 3.4 `friction` 与 `signals`
+### 3.4 `sweep`（流动性扫荡）
+
+```json
+{
+  "score": -0.188, "conviction": 0.81, "dominant_side": "below",
+  "above_usd": 124660000.0, "below_usd": 151480000.0, "total_usd": 276140000.0,
+  "model_above_usd": 61200000.0, "model_below_usd": 94000000.0,
+  "target": {"price": 74556.62, "usd": 127230000.0, "source": "book", "dist_pct": -0.1},
+  "pools": [
+    {"price": 74556.62, "usd": 127230000.0, "weighted_usd": 90300000.0, "source": "book", "side": "below", "dist_pct": -0.1}
+  ],
+  "coverage": {"book": 0.45, "iceberg": 0.12, "liq_model": 0.31, "liq_actual": 0.12}
+}
+```
+
+`score` 为正表示上方可扫荡流动性更厚、价格倾向向上；为负表示下方更厚。
+`above_usd` / `below_usd` 只含盘口与冰山的真实可成交深度；`model_*` 含估算清算。
+`target` 是预测方向 0.08%–1.2% 内最厚的可成交池；`pools` 按加权金额排序（最多 12）。
+`coverage` 是各来源在混合中的实际权重，用于判断结论有多依赖估算清算。
+
+### 3.5 `friction` 与 `signals`
 
 `friction`：24 个点，`dist_pct` 距离（%），`up_usd`/`down_usd` 为从中间价累计吃单到该距离所需美元——**阻力曲线**。
 
@@ -162,17 +182,20 @@ snapshot 结构并交给现有 Dashboard 渲染。相比后端快照，静态版
 [{"dist_pct": 0.125, "up_usd": 36558162.8, "down_usd": 26280628.6}]
 ```
 
-`signals`：5 个分量，`score` ∈ [−1,1]，正数表示该维度支持上行（阻力更小）。
+`signals`：5 个分量，`score` ∈ [−1,1]，正数表示该维度支持上行。
 `prediction.score` 是加权和；`direction` = `up|down|neutral`（阈值 ±0.07）。
-`book` 读 ±1% 静态深度；`walls` 读墙/冰山在近 2 分钟被主动成交吸收的方向；
-`vacuum` 读 1.5–3% 外侧密度——三者使用不同证据与价格区间，不重复计分。
+`key` 顺序固定为 `sweep | flow | absorption | liquidations | vacuum`：
+`sweep` 读上下流动性池（挂单+冰山+清算，距离衰减），`flow` 读 5 分钟主动买卖差，
+`absorption` 读墙/冰山近 2 分钟真实吸收（`WALL_MODE` 只作用于这一项），
+`liquidations` 读近 5 分钟已实现强平流（空头清算=买入，多头清算=卖出），
+`vacuum` 读 1.5–3% 外侧密度。估算清算只进入 `sweep`，不重复计分。
 
 ```json
-{"key": "walls", "label": "墙/冰山吸收", "score": 0.0821, "weight": 0.24,
- "contribution": 0.0197, "detail": "近 2 分钟买侧吸收 $1.32M / 卖侧吸收 $1.10M（墙与冰山，含回补加成）"}
+{"key": "absorption", "label": "墙/冰山吸收", "score": 0.0821, "weight": 0.08,
+ "contribution": 0.0066, "detail": "近 2 分钟买侧吸收 $1.32M / 卖侧吸收 $1.10M（墙与冰山，含回补加成）"}
 ```
 
-### 3.5 `prediction`
+### 3.6 `prediction`
 
 ```json
 {
@@ -180,18 +203,18 @@ snapshot 结构并交给现有 Dashboard 渲染。相比后端快照，静态版
   "horizon_min": 15,
   "target_price": 2248.82, "invalidation_price": 2245.13,
   "levels": [
-    {"price": 2248.82, "kind": "wall", "label": "卖墙", "usd": 1000000.0, "dist_pct": 0.093},
+    {"price": 2248.82, "kind": "sweep", "label": "流动性扫荡池", "usd": 127230000.0, "dist_pct": 0.093},
     {"price": 2248.98, "kind": "liq", "label": "空头清算簇", "usd": 5980000000.0, "dist_pct": 0.1}
   ],
-  "narrative": "价格上方阻力更薄：...",
+  "narrative": "流动性扫荡向下：下方最厚池 74,556.62（$127.23M）是首要扫荡目标；可扫荡流动性 上方 $124.66M / 下方 $151.48M；… 综合得分 -0.18，15 分钟上行概率 40%。",
   "updated_ts": 1794038569071
 }
 ```
 
 `neutral` 时 `target_price`/`invalidation_price` 可能为 `null`，`levels` 可能为空；
-`levels.kind` ∈ `wall | liq`，是价格要去磁吸/失效的位置。
+`levels.kind` ∈ `sweep | wall | liq`，第一个通常是最厚扫荡池。
 
-### 3.6 `accuracy` 与 `chart`
+### 3.7 `accuracy` 与 `chart`
 
 ```json
 "accuracy": {"samples": 12, "hits": 7, "hit_rate": 0.5833, "brier": 0.241,
@@ -235,7 +258,7 @@ snapshot 结构并交给现有 Dashboard 渲染。相比后端快照，静态版
 ## 6. 页面结构（建议，按“最小阻力”这一中心组织）
 
 1. 顶栏：品牌 MIN·RESISTANCE / 最小阻力、LIVE 状态、UTC+8 时钟、数据源、延迟。
-2. 双币主卡：价格、24h 涨跌、标记价格/资金费率/持仓量；**方向罗盘**（上方阻力 vs 下方阻力，指针偏向阻力小的一侧）；预测方向、置信度、目标价、失效价、15 分钟窗口。
+2. 双币主卡：价格、24h 涨跌、标记价格/资金费率/持仓量；**流动性扫荡罗盘**（上方/下方可扫荡流动性，指针偏向更厚的一侧）；预测方向、置信度、目标价、失效价、15 分钟窗口。
 3. 阻力剖面：订单簿深度直方图（左买右卖）+ 清算热力 + 冰山/墙体标记，共用一个价格轴。
 4. 摩擦曲线：向上/向下累计吃单美元 vs 距离，两条曲线交叉处即“最小阻力方向”。
 5. 清算地图：价格 × 多空清算量热力条，标出最近簇。

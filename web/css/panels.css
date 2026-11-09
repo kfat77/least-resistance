@@ -242,12 +242,12 @@
 
 .bias-b {
   width: 50%;
-  background: linear-gradient(90deg, rgba(14, 203, 129, 0.55), var(--up));
+  background: linear-gradient(90deg, rgba(246, 70, 93, 0.55), var(--down));
 }
 
 .bias-a {
   width: 50%;
-  background: linear-gradient(90deg, var(--down), rgba(246, 70, 93, 0.55));
+  background: linear-gradient(90deg, var(--up), rgba(14, 203, 129, 0.55));
 }
 
 .bias-mid {

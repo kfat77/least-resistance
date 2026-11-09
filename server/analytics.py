@@ -202,6 +202,30 @@ class LiquidationBook:
             "recent": recent,
             "map": self._histogram(mid),
             "clusters": self._clusters(mid, long_usd, short_usd),
+            "flow": self.recent_flow(now),
+        }
+
+    def recent_flow(self, now: float) -> dict:
+        """Realized forced-order notional in the last LIQ_FLOW_WINDOW_S.
+
+        Short liquidations are forced buys and push price up; long liquidations
+        are forced sells and push price down.  This is a trigger, not a magnet.
+        """
+        window = config.LIQ_FLOW_WINDOW_S
+        long_usd = short_usd = 0.0
+        for event in self.events:
+            if event.ts < now - window:
+                continue
+            if event.side == "long":
+                long_usd += event.usd
+            else:
+                short_usd += event.usd
+        total = long_usd + short_usd
+        return {
+            "window_s": window,
+            "long_usd": round(long_usd, 2),
+            "short_usd": round(short_usd, 2),
+            "score": (short_usd - long_usd) / total if total else 0.0,
         }
 
     def _histogram(self, mid: float) -> list[dict]:
@@ -620,12 +644,155 @@ def liquidation_pressure(
     return max(-1.0, min(1.0, score)), above, below
 
 
+def liquidity_sweep(
+    book: OrderBook,
+    icebergs: list[dict],
+    liq_summary: dict,
+    estimated: list[dict],
+    mid: float,
+    symbol: str,
+) -> dict:
+    """Weighted liquidity pools above vs below mid: the sweep destination.
+
+    Price is assumed to travel toward the side with more executable liquidity:
+    resting depth, hidden iceberg size, the forward liquidation map and realized
+    liquidation clusters all contribute.  Each pool is decayed exponentially by
+    distance so far-away size cannot dominate the current 15-minute horizon.
+    Positive score means the upside pool is heavier (up is the sweep path).
+    """
+    if mid <= 0:
+        return _empty_sweep()
+    decay = config.SWEEP_DECAY_PCT
+    pools: list[dict] = []
+    sources = tuple(config.SWEEP_SOURCE_WEIGHTS)
+    source_above = {key: 0.0 for key in sources}
+    source_below = {key: 0.0 for key in sources}
+
+    def add(price: float, side: str, usd: float, source: str) -> None:
+        if price <= 0 or usd <= 0:
+            return
+        dist = abs(price - mid) / mid
+        if dist > config.PROFILE_RANGE:
+            return
+        weighted = usd * math.exp(-dist / decay)
+        if side == "above":
+            source_above[source] += weighted
+        else:
+            source_below[source] += weighted
+        pools.append(
+            {
+                "price": round(price, 2),
+                "side": side,
+                "source": source,
+                "usd": round(usd, 2),
+                "weighted_usd": round(weighted, 2),
+                "dist_pct": round((price - mid) / mid * 100, 3),
+            }
+        )
+
+    bins = book.profile(config.PROFILE_BINS, config.PROFILE_RANGE)
+    width = mid * 2.0 * config.PROFILE_RANGE / config.PROFILE_BINS
+    for price_low, bid_usd, ask_usd in bins:
+        center = price_low + width / 2.0
+        if center < mid:
+            add(center, "below", bid_usd, "book")
+        elif center > mid:
+            add(center, "above", ask_usd, "book")
+
+    for ice in icebergs:
+        side = "above" if ice["side"] == "ask" else "below"
+        add(float(ice["price"]), side, float(ice.get("hidden_usd", 0.0)), "iceberg")
+
+    for level in estimated:
+        price = float(level["price"])
+        if price > mid and level.get("short_usd", 0.0) > 0:
+            add(price, "above", level["short_usd"], "liq_model")
+        elif price < mid and level.get("long_usd", 0.0) > 0:
+            add(price, "below", level["long_usd"], "liq_model")
+
+    for cluster in liq_summary.get("clusters", []):
+        price = float(cluster["price"])
+        if price > mid and cluster.get("side") == "short":
+            add(price, "above", cluster["usd"], "liq_actual")
+        elif price < mid and cluster.get("side") == "long":
+            add(price, "below", cluster["usd"], "liq_actual")
+
+    real_above = source_above["book"] + source_above["iceberg"]
+    real_below = source_below["book"] + source_below["iceberg"]
+    real_total = real_above + real_below
+    if real_total <= 0 and not pools:
+        return _empty_sweep()
+    full = config.SWEEP_FULL_USD.get(symbol, 5_000_000.0)
+    conviction = min(1.0, real_total / full) if real_total > 0 else 0.0
+
+    above = below = 0.0
+    for source in sources:
+        source_total = source_above[source] + source_below[source]
+        if source_total <= 0:
+            continue
+        trust = config.SWEEP_SOURCE_WEIGHTS[source]
+        above += trust * source_above[source] / source_total
+        below += trust * source_below[source] / source_total
+    total = above + below
+    raw = (above - below) / total if total > 0 else 0.0
+    score = math.tanh(config.SWEEP_GAIN * raw) * conviction
+    dominant = "above" if above >= below else "below"
+    side_pools = [p for p in pools if p["side"] == dominant]
+    reachable = [p for p in side_pools if p["dist_pct"] <= config.TARGET_MAX_PCT * 100]
+    real_pools = [p for p in side_pools if p["source"] in ("book", "iceberg")]
+    if real_pools:
+        pool_set = [p for p in reachable if p["source"] in ("book", "iceberg")] or real_pools
+    else:
+        pool_set = reachable or side_pools
+    target = max(pool_set, key=lambda p: p["usd"]) if pool_set else None
+    pools.sort(key=lambda p: p["weighted_usd"], reverse=True)
+    return {
+        "score": score,
+        "above_usd": round(real_above, 2),
+        "below_usd": round(real_below, 2),
+        "total_usd": round(real_total, 2),
+        "model_above_usd": round(source_above["liq_model"], 2),
+        "model_below_usd": round(source_below["liq_model"], 2),
+        "conviction": round(conviction, 3),
+        "dominant_side": dominant,
+        "target": {
+            "price": target["price"],
+            "usd": target["usd"],
+            "source": target["source"],
+            "dist_pct": target["dist_pct"],
+        }
+        if target
+        else None,
+        "pools": pools[: config.SWEEP_POOL_LIMIT],
+        "coverage": {
+            key: round(source_above[key] + source_below[key], 2) for key in sources
+        },
+    }
+
+
+def _empty_sweep() -> dict:
+    return {
+        "score": 0.0,
+        "above_usd": 0.0,
+        "below_usd": 0.0,
+        "total_usd": 0.0,
+        "model_above_usd": 0.0,
+        "model_below_usd": 0.0,
+        "conviction": 0.0,
+        "dominant_side": "above",
+        "target": None,
+        "pools": [],
+        "coverage": {"book": 0.0, "iceberg": 0.0, "liq_model": 0.0, "liq_actual": 0.0},
+    }
+
+
 def pick_targets(
     direction: str,
     mid: float,
     walls: dict,
     estimated: list[dict],
     liq_summary: dict,
+    sweep_target: dict | None = None,
 ) -> dict:
     """Choose the nearest meaningful price magnets along the predicted path."""
     if direction == "neutral" or mid <= 0:
@@ -635,6 +802,21 @@ def pick_targets(
     lo = mid * (1 + sign * config.TARGET_MIN_PCT)
     hi = mid * (1 + sign * config.TARGET_MAX_PCT)
     low, high = min(lo, hi), max(lo, hi)
+
+    # The sweep destination overrides "nearest candidate": if the thickest
+    # reachable pool on the predicted side is inside the target window, it is
+    # the thesis-consistent first target.
+    if sweep_target:
+        price = float(sweep_target["price"])
+        if low <= price <= high:
+            candidates.append(
+                {
+                    "price": price,
+                    "usd": float(sweep_target.get("usd", 0.0)),
+                    "kind": "sweep",
+                    "label": "流动性扫荡池",
+                }
+            )
 
     for level in estimated:
         price = level["price"]
@@ -694,7 +876,15 @@ def pick_targets(
                 }
             ],
         }
-    candidates.sort(key=lambda c: (abs(c["price"] - mid), -c["usd"]))
+    candidates.sort(
+        key=lambda c: (0 if c["kind"] == "sweep" else 1, abs(c["price"] - mid), -c["usd"])
+    )
+    unique: list[dict] = []
+    for candidate in candidates:
+        if any(abs(candidate["price"] - kept["price"]) <= mid * 0.0002 for kept in unique):
+            continue
+        unique.append(candidate)
+    candidates = unique
     levels = []
     for item in candidates[:3]:
         levels.append(

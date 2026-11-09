@@ -110,16 +110,16 @@
 
           <section class="card resist-card">
             <div class="card-head">
-              <h2>阻力平衡 <em>RESISTANCE</em></h2>
+              <h2>流动性扫荡 <em>SWEEP</em></h2>
               <span class="card-tag is-on" id="bias-tag">—</span>
             </div>
             <div class="resist-body">
               <div class="resist-row">
-                <span>买盘深度</span>
+                <span>上方流动性</span>
                 <b class="num up" id="rs-bid">—</b>
               </div>
               <div class="resist-row">
-                <span>卖盘深度</span>
+                <span>下方流动性</span>
                 <b class="num down" id="rs-ask">—</b>
               </div>
               <div class="bias-bar" aria-hidden="true">
@@ -376,9 +376,10 @@
           <div>
             <h3>方法 <em>METHOD</em></h3>
             <p>
-              综合分 = 盘口失衡 × 30% + 墙体阻力 × 24% + 清算燃料 × 22% + 主动成交流 × 14% + 流动性真空 × 10%。
-              score 为正表示上行阻力更小，超过 +0.07 判定看涨，低于 −0.07 判定看跌，其余为中性。
-              预测视界 15 分钟，目标/失效价来自墙与清算簇；中性预测不出目标价。
+              综合分 = 流动性扫荡 × 68% + 主动成交流 × 14% + 墙/冰山吸收 × 8% + 已实现清算流 × 5% + 流动性真空 × 5%。
+              扫荡分为正表示上方可扫荡流动性更厚、价格倾向向上扫穿；为负表示下方更厚、倾向向下。
+              超过 +0.07 判定看涨，低于 −0.07 判定看跌，其余为中性。预测视界 15 分钟，
+              目标价取预测方向上最厚的扫荡池；失效价为反方向最近挂单墙。中性预测不出目标价。
             </p>
           </div>
           <div>
@@ -387,7 +388,7 @@
               实时数据优先取自 Binance USDⓈ-M 永续；若当前网络无法访问期货接口，浏览器会自动切换
               Binance 现货公共行情（此时无资金费率/持仓量，实际强平为 0，清算带为模型估算）。
               快照约每 0.9 秒刷新一次，K 线为 1m / 15m。
-              实际强平为交易所 forceOrder 成交（本环境常为 0 笔）；清算地图、清算燃料为基于成交分布与杠杆结构的
+              实际强平为交易所 forceOrder 成交（本环境常为 0 笔）；清算地图、扫荡池中的清算部分为基于成交分布与杠杆结构的
               <b>模型估算</b>，不代表交易所持仓数据。ETH 指标同理。
             </p>
           </div>

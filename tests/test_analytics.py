@@ -10,6 +10,7 @@ from server.analytics import (
     estimate_liquidation_map,
     friction_curve,
     iceberg_metrics,
+    liquidity_sweep,
     pick_targets,
     vacuum_metrics,
     wall_metrics,
@@ -242,3 +243,78 @@ def test_vacuum_reads_outside_the_book_signal_corridor() -> None:
     assert metrics["up_density"] < metrics["down_density"]
     assert metrics["score"] > 0.9
 
+
+def _sweep_book(bid_qty: str = "1000", ask_qty: str = "1000") -> OrderBook:
+    bids = [[f"{100.0 - i / 10:.1f}", bid_qty] for i in range(1, 31)]
+    asks = [[f"{100.0 + i / 10:.1f}", ask_qty] for i in range(1, 31)]
+    return _book(bids, asks)
+
+
+def test_liquidity_sweep_points_toward_the_heavier_side() -> None:
+    ask_heavy = liquidity_sweep(
+        _sweep_book("300", "5000"), [], {"clusters": []}, [], 100.0, BTC
+    )
+    assert ask_heavy["score"] > 0.5
+    assert ask_heavy["above_usd"] > ask_heavy["below_usd"]
+    assert ask_heavy["target"]["price"] > 100.0
+    assert ask_heavy["target"]["source"] == "book"
+
+    bid_heavy = liquidity_sweep(
+        _sweep_book("5000", "300"), [], {"clusters": []}, [], 100.0, BTC
+    )
+    assert bid_heavy["score"] < -0.5
+    assert bid_heavy["target"]["price"] < 100.0
+
+
+def test_liquidity_sweep_decays_with_distance() -> None:
+    bids = [[f"{99.9 - i / 10:.1f}", "5000"] for i in range(4)]  # ~$2.5M near
+    asks = [["100.1", "1"], ["102.8", "100000"]]                  # ~$10M far
+    sweep = liquidity_sweep(_book(bids, asks), [], {"clusters": []}, [], 100.0, BTC)
+    assert sweep["score"] < 0
+    assert sweep["below_usd"] > sweep["above_usd"]
+
+
+def test_liquidity_sweep_includes_iceberg_hidden_size(monkeypatch) -> None:
+    monkeypatch.setitem(config.SWEEP_FULL_USD, BTC, 100_000.0)
+    base = liquidity_sweep(_sweep_book(), [], {"clusters": []}, [], 100.0, BTC)
+    assert abs(base["score"]) < 0.01
+    icebergs = [{"side": "ask", "price": 100.5, "hidden_usd": 5_000_000.0}]
+    sweep = liquidity_sweep(_sweep_book(), icebergs, {"clusters": []}, [], 100.0, BTC)
+    assert sweep["score"] > 0.2
+    assert sweep["coverage"]["iceberg"] > 0
+
+
+def test_liquidity_sweep_includes_estimated_and_actual_liquidations(monkeypatch) -> None:
+    monkeypatch.setitem(config.SWEEP_FULL_USD, BTC, 100_000.0)
+    estimated = [{"price": 100.6, "long_usd": 0.0, "short_usd": 8_000_000.0}]
+    sweep = liquidity_sweep(_sweep_book(), [], {"clusters": []}, estimated, 100.0, BTC)
+    assert sweep["score"] > 0.2
+    assert sweep["coverage"]["liq_model"] > 0
+
+    clusters = [{"price": 99.4, "side": "long", "usd": 6_000_000.0}]
+    sweep = liquidity_sweep(_sweep_book(), [], {"clusters": clusters}, [], 100.0, BTC)
+    assert sweep["score"] < -0.2
+    assert sweep["coverage"]["liq_actual"] > 0
+
+
+def test_pick_targets_prefers_the_sweep_pool() -> None:
+    walls = {"walls": [{"side": "ask", "price": 100.2, "usd": 1_000_000.0, "dist_pct": 0.2}]}
+    result = pick_targets(
+        "up", 100.0, walls, [], {"clusters": []},
+        {"price": 100.8, "usd": 9_000_000.0, "source": "book"},
+    )
+    assert result["target"] == pytest.approx(100.8)
+    assert result["levels"][0]["kind"] == "sweep"
+    assert result["levels"][0]["label"] == "流动性扫荡池"
+
+
+def test_liquidation_recent_flow_pushes_up_after_short_liquidations() -> None:
+    liq = LiquidationBook()
+    liq.add(NOW - 30, "short", 101.0, 20.0)   # $2020 forced buys
+    liq.add(NOW - 20, "long", 99.0, 10.0)     # $990 forced sells
+    liq.add(NOW - 2000, "short", 101.0, 1000.0)  # outside the flow window
+    flow = liq.summary(NOW, 100.0)["flow"]
+    assert flow["short_usd"] == pytest.approx(2020.0)
+    assert flow["long_usd"] == pytest.approx(990.0)
+    assert flow["score"] == pytest.approx((2020.0 - 990.0) / 3010.0)
+    assert flow["score"] > 0
