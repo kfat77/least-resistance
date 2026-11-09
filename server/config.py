@@ -117,6 +117,7 @@ VACUUM_HIGH = 0.03
 # that pulls price toward it (bid wall pulls down, ask wall pulls up).  Both
 # modes are logged in parallel; decide the default from Brier/hit-rate evidence.
 WALL_MODES = ("barrier", "magnet")
+WALL_MODE_FROM_ENV = "WALL_MODE" in os.environ
 WALL_MODE = os.environ.get("WALL_MODE", "barrier").strip().lower()
 if WALL_MODE not in WALL_MODES:
     raise ValueError(f"WALL_MODE must be one of {WALL_MODES}, got {WALL_MODE!r}")

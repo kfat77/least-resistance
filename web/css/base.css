@@ -311,6 +311,81 @@ body.is-stale .bg-fx {
   font-weight: 700;
 }
 
+.wall-switch {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  flex: 0 0 auto;
+}
+
+.ws-label {
+  margin-right: 3px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--ink-4);
+  white-space: nowrap;
+}
+
+.ws-label i {
+  font-style: normal;
+  font-family: var(--mono);
+  letter-spacing: 0.12em;
+}
+
+.ws-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.ws-btn em {
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: 0.08em;
+  color: var(--ink-4);
+}
+
+.ws-btn:hover {
+  color: var(--ink);
+  background: var(--raise);
+}
+
+.ws-btn.is-on {
+  color: #101318;
+  background: var(--amber);
+  font-weight: 700;
+}
+
+.ws-btn.is-on em {
+  color: rgba(16, 19, 24, 0.62);
+}
+
+.ws-alt {
+  margin-left: 2px;
+  padding: 0 5px;
+  border: 1px solid rgba(45, 212, 232, 0.3);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 8px;
+  line-height: 16px;
+  letter-spacing: 0.06em;
+  color: var(--cyan);
+  white-space: nowrap;
+}
+
 .top-status {
   display: flex;
   align-items: center;
@@ -964,6 +1039,9 @@ body.is-booting .ticker-price .chg-abs {
 /* ---------- breakpoints: shell ---------- */
 
 @media (max-width: 1320px) {
+  .ws-label {
+    display: none;
+  }
   .work-grid {
     grid-template-columns: 204px minmax(0, 1fr) 286px;
   }
@@ -993,6 +1071,10 @@ body.is-booting .ticker-price .chg-abs {
   .nav-btn {
     padding: 0 8px;
     font-size: 11.5px;
+  }
+
+  .ws-btn em {
+    display: none;
   }
 }
 
@@ -1073,8 +1155,18 @@ body.is-booting .ticker-price .chg-abs {
   }
 
   .tb-meta--age,
-  .tb-meta:has(#latency) {
+  .tb-meta:has(#latency),
+  .tb-meta:has(#feed-source) {
     display: none;
+  }
+
+  .wall-switch {
+    padding-left: 4px;
+  }
+
+  .ws-btn {
+    padding: 0 7px;
+    font-size: 10.5px;
   }
 
   .clock {
@@ -1122,6 +1214,16 @@ body.is-booting .ticker-price .chg-abs {
 }
 
 @media (max-width: 430px) {
+  .brand-txt,
+  .clock {
+    display: none;
+  }
+
+  .wall-switch {
+    height: 28px;
+    padding: 2px 3px;
+  }
+
   .pair-tabs {
     padding: 2px;
   }

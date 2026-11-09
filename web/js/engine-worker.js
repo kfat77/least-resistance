@@ -82,6 +82,7 @@ let snapshotBusy = false;
 let allowPartial = false;
 let lastPredCount = -1;
 let pendingPredictions = null;
+let pendingWallMode = '';
 
 let ws = null;
 let wsOpen = false;
@@ -153,7 +154,12 @@ self.onmessage = (event) => {
   if (!data || typeof data !== 'object') return;
   if (data.type === 'init') {
     pendingPredictions = typeof data.predictions === 'string' ? data.predictions : null;
+    if (typeof data.wallMode === 'string' && data.wallMode) pendingWallMode = data.wallMode;
     applyPredictions();
+    applyWallMode();
+  } else if (data.type === 'wallMode') {
+    pendingWallMode = typeof data.mode === 'string' ? data.mode : '';
+    applyWallMode();
   }
 };
 
@@ -353,6 +359,13 @@ const BRIDGE_SOURCE = [
   '        except Exception:',
   '            continue',
   "    return ''",
+  '',
+  'def api_set_wall_mode(mode_text):',
+  '    try:',
+  '        hub.set_wall_mode(str(mode_text))',
+  '    except ValueError as exc:',
+  '        return str(exc)',
+  "    return ''",
 ].join('\n');
 
 const BRIDGE_NAMES = [
@@ -375,6 +388,7 @@ const BRIDGE_NAMES = [
   ['snapshot', 'api_snapshot'],
   ['predDump', 'api_pred_dump'],
   ['predLoad', 'api_pred_load'],
+  ['wallMode', 'api_set_wall_mode'],
 ];
 
 async function loadPythonModuleSources() {
@@ -474,6 +488,7 @@ async function initEngine() {
   api = bridge;
   engineInitMs = Math.round(performance.now() - started);
   applyPredictions();
+  applyWallMode();
   self.postMessage({
     type: 'engine',
     engine: 'pyodide',
@@ -508,6 +523,19 @@ function applyPredictions() {
     logError('restore predictions', err);
   }
   pendingPredictions = null;
+}
+
+function applyWallMode() {
+  if (!api || !pendingWallMode) return;
+  const mode = pendingWallMode;
+  pendingWallMode = '';
+  try {
+    const error = api.wallMode(mode);
+    if (error) postNotice(`墙模式切换失败：${error}`, 'rose');
+  } catch (err) {
+    logError('wall mode', err);
+    postNotice('墙模式切换失败，保持当前模式', 'rose');
+  }
 }
 
 /* ------------------------------------------------------------------ */

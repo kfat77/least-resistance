@@ -67,7 +67,7 @@ class MarketHub:
         self.mode = "connecting"
         self.data_dir = config.DATA_DIR / ("sim" if resolved_mode == "sim" else "live")
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.wall_mode = config.WALL_MODE
+        self.wall_mode = self._initial_wall_mode()
         self.wall_mode_alt = next(m for m in config.WALL_MODES if m != self.wall_mode)
         self.states: dict[str, SymbolState] = {}
         for symbol in config.SYMBOLS:
@@ -119,6 +119,37 @@ class MarketHub:
             if legacy.exists():
                 return legacy
         return self.data_dir / f"predictions_{symbol}_{mode}.json"
+
+    def _initial_wall_mode(self) -> str:
+        """Prefer an explicit WALL_MODE env var, then the last mode chosen in the UI."""
+        if not config.WALL_MODE_FROM_ENV:
+            path = self.data_dir / "wall_mode.txt"
+            if path.exists():
+                try:
+                    saved = path.read_text(encoding="utf-8").strip().lower()
+                except OSError:
+                    saved = ""
+                if saved in config.WALL_MODES:
+                    return saved
+        return config.WALL_MODE
+
+    def set_wall_mode(self, mode: str) -> None:
+        """Swap the displayed wall interpretation at runtime; both ledgers keep accumulating."""
+        mode = str(mode).strip().lower()
+        if mode not in config.WALL_MODES:
+            raise ValueError(f"wall mode must be one of {config.WALL_MODES}, got {mode!r}")
+        if mode == self.wall_mode:
+            return
+        previous = self.wall_mode
+        self.wall_mode, self.wall_mode_alt = mode, previous
+        for state in self.states.values():
+            state.ledger, state.shadow_ledger = state.shadow_ledger, state.ledger
+        try:
+            (self.data_dir / "wall_mode.txt").write_text(
+                f"{mode}\n", encoding="utf-8"
+            )
+        except OSError:
+            pass  # persistence is best-effort; the process still switches
 
     # ------------------------------------------------------------------
     # feed plumbing

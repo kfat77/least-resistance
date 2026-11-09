@@ -41,6 +41,7 @@ const ICONS = { BTCUSDT: '₿', ETHUSDT: 'Ξ' };
 const SHORT = { BTCUSDT: 'BTC', ETHUSDT: 'ETH' };
 
 const BOOK_ROWS = 14;
+const WALL_TEXT = { barrier: '障碍', magnet: '磁铁' };
 
 function qs(sel, root = document) {
   return root.querySelector(sel);
@@ -346,6 +347,7 @@ export class Dashboard {
       if (!t) return;
       if (t.classList.contains('nav-btn')) return this.goSection(t.dataset.view);
       if (t.classList.contains('pair-tab')) return this.setPair(t.dataset.sym);
+      if (t.dataset.wall) return this.setWallMode(t.dataset.wall);
       if (t.dataset.period) return this.setPeriod(t.dataset.period);
       if (t.dataset.ol) return this.toggleOverlay(t.dataset.ol, t);
       if (t.classList.contains('ltab')) return this.openPanel(t.dataset.panel);
@@ -401,6 +403,41 @@ export class Dashboard {
     this.period = period;
     this.syncSegment();
     if (this.snap) this.paintChart();
+  }
+
+  setWallMode(mode) {
+    if (!(mode in WALL_TEXT) || mode === this.wallMode) return;
+    const previous = this.wallMode || 'barrier';
+    this.syncWallSwitch(mode, true);
+    this.note(`墙模式 · ${WALL_TEXT[mode]}（另一种模式继续并行记账）`, 'amber');
+    const hook = window.__setWallMode;
+    if (typeof hook !== 'function') {
+      this.syncWallSwitch(previous);
+      this.note('离线预览：墙模式切换不可用', 'amber');
+      return;
+    }
+    Promise.resolve(hook(mode)).catch(() => {
+      this.syncWallSwitch((this.snap && this.snap.model && this.snap.model.wall_mode) || previous);
+      this.note('墙模式切换失败，保持当前模式', 'rose');
+    });
+  }
+
+  syncWallSwitch(mode, pending = false) {
+    if (!(mode in WALL_TEXT)) mode = 'barrier';
+    this.wallMode = mode;
+    for (const btn of this.root.querySelectorAll('[data-wall]')) {
+      const on = btn.dataset.wall === mode;
+      btn.classList.toggle('is-on', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+    const alt = mode === 'barrier' ? 'magnet' : 'barrier';
+    const badge = document.getElementById('ws-alt');
+    if (badge) {
+      badge.textContent = pending ? '切换中' : `A/B · ${WALL_TEXT[alt]}`;
+      badge.title = pending
+        ? '正在切换墙模式'
+        : `另一种模式（${WALL_TEXT[alt]}）在后台并行记账，用 Brier / 命中率做 A/B`;
+    }
   }
 
   toggleOverlay(key, btn) {
@@ -501,6 +538,7 @@ export class Dashboard {
     if (tkMkt) setTxt(tkMkt, mkt);
     const chMkt = this.ref('ch-mkt');
     if (chMkt) setTxt(chMkt, mkt);
+    this.syncWallSwitch(((this.snap && this.snap.model) || {}).wall_mode || 'barrier');
     this.paintTicker(s);
     this.paintHeader(s);
     this.paintChart(s);

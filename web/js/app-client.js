@@ -83,6 +83,13 @@ class App {
       this.actionToastUntil = Date.now() + 2200;
       this.toast(message, toneName || 'muted', 2200);
     };
+    window.__setWallMode = (mode) => {
+      if (this.isMock) throw new Error('mock snapshot is read-only');
+      if (!this.worker) throw new Error('engine not ready');
+      localStorage.setItem('mr-wall-mode', mode);
+      this.worker.postMessage({ type: 'wallMode', mode });
+      return Promise.resolve({ ok: true });
+    };
     this.tickClock();
     setInterval(() => this.tickClock(), 300);
     setInterval(() => this.tickMeta(), 400);
@@ -131,7 +138,11 @@ class App {
       this.failEngine(reason);
     };
     worker.onmessageerror = () => this.failEngine('worker message decode error');
-    worker.postMessage({ type: 'init', predictions: this.readPredictions() });
+    worker.postMessage({
+      type: 'init',
+      predictions: this.readPredictions(),
+      wallMode: localStorage.getItem('mr-wall-mode') || '',
+    });
   }
 
   onEngineMessage(data) {

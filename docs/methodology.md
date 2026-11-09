@@ -187,6 +187,9 @@ Brier 分数使用 `(p_up - outcome)²`，越低越好；它同时惩罚过度�
 （`LEDGER_TICK_S`），即使无人打开页面，样本也会继续积累。
 
 - 实验起点 `model.ab_started` 之后记录的样本才计入 A/B（历史账本不污染对照）；
+- 页面顶栏「墙模式 WALL」分段控件可随时切换当前展示模式；本地站调用
+  `POST /api/wall-mode` 并写入 `data/<mode>/wall_mode.txt`，静态站在 Worker 内
+  切换并用 `localStorage` 记住选择；显式 `WALL_MODE` 环境变量仍优先；
 - `accuracy_ab` 与 `accuracy_alt_ab` 分别给出现行模式与影子模式的
   `samples / hits / hit_rate / brier / pending`；
 - 决策规则：两种模式各至少 20 条已结算窗口（Brier 对全部已结算窗口计算，方向命

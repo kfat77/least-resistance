@@ -11,7 +11,13 @@
 | `GET /api/snapshot` | 完整快照 JSON，结构与 WS 首帧一致 |
 | `GET /ws` | WebSocket，服务端约每 900ms 推送一帧完整快照（客户端只收不发） |
 | `GET /api/health` | 连接/数据源健康状态 |
+| `POST /api/wall-mode` | 运行时切换墙模式，body `{"mode": "barrier"\|"magnet"}` |
 | `GET /mock/snapshot.json` | 静态 mock 快照，供无后端时开发/截图 |
+
+`POST /api/wall-mode` 成功返回 `{"ok": true, "wall_mode": "...", "wall_mode_alt": "..."}`，
+非法值返回 400；切换后两本账本的角色互换（原影子账本转为展示账本，账本内容继续累积），
+并写入 `data/<mode>/wall_mode.txt`。静态站不支持该 HTTP 路由，改由 Worker 内的
+`hub.set_wall_mode()` 切换，并用 `localStorage["mr-wall-mode"]` 记住选择。
 
 WS 是纯推送：每帧就是完整的 snapshot 对象，不做增量。断线自动重连即可。
 开发时可在 URL 加 `?mock=1` 直接读取 `/mock/snapshot.json`（由前端实现）。

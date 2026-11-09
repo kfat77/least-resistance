@@ -34,6 +34,11 @@ class SnapshotCache:
             self._built_at = now
         return self._snapshot
 
+    def invalidate(self) -> None:
+        """Force the next get() to rebuild, e.g. right after a wall-mode switch."""
+        self._snapshot = None
+        self._built_at = 0.0
+
 
 CACHE_KEY = web.AppKey("snapshot_cache", SnapshotCache)
 LEDGER_TASK_KEY = web.AppKey("ledger_task", asyncio.Task)
@@ -66,6 +71,29 @@ async def api_snapshot(request: web.Request) -> web.Response:
     cache: SnapshotCache = request.app[CACHE_KEY]
     return web.json_response(
         cache.get(), dumps=lambda value: json.dumps(value, ensure_ascii=False)
+    )
+
+
+async def api_wall_mode(request: web.Request) -> web.Response:
+    """Switch the displayed wall interpretation; returns the new active/shadow pair."""
+    hub: MarketHub = request.app[HUB_KEY]
+    cache: SnapshotCache = request.app[CACHE_KEY]
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        raise web.HTTPBadRequest(text="expected JSON body")
+    mode = payload.get("mode") if isinstance(payload, dict) else None
+    try:
+        hub.set_wall_mode(str(mode or ""))
+    except ValueError as exc:
+        return web.json_response({"ok": False, "error": str(exc)}, status=400)
+    cache.invalidate()
+    return web.json_response(
+        {
+            "ok": True,
+            "wall_mode": hub.wall_mode,
+            "wall_mode_alt": hub.wall_mode_alt,
+        }
     )
 
 
@@ -133,6 +161,7 @@ def create_app(hub: MarketHub) -> web.Application:
     app[CACHE_KEY] = SnapshotCache(hub)
     app.router.add_get("/", index)
     app.router.add_get("/api/snapshot", api_snapshot)
+    app.router.add_post("/api/wall-mode", api_wall_mode)
     app.router.add_get("/api/health", api_health)
     app.router.add_get("/ws", websocket)
     app.router.add_static("/css", WEB_ROOT / "css")

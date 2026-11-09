@@ -45,6 +45,17 @@
           <button type="button" class="pair-tab" role="tab" aria-selected="false" data-sym="ETHUSDT">ETHUSDT</button>
         </div>
 
+        <div class="wall-switch" id="wall-switch" role="group" aria-label="墙模式：障碍或磁铁">
+          <span class="ws-label">墙模式 <i>WALL</i></span>
+          <button type="button" class="ws-btn is-on" data-wall="barrier" aria-pressed="true" title="墙=障碍：厚买墙支撑价格、厚卖墙压制价格">
+            障碍 <em>BARRIER</em>
+          </button>
+          <button type="button" class="ws-btn" data-wall="magnet" aria-pressed="false" title="墙=磁铁：厚墙吸引价格向其成交">
+            磁铁 <em>MAGNET</em>
+          </button>
+          <span class="ws-alt" id="ws-alt" title="另一种模式在后台并行记账，用于 A/B 比较">A/B</span>
+        </div>
+
         <div class="top-status">
           <span class="status-chip" id="conn-chip" data-state="boot">
             <span class="dot" aria-hidden="true"></span>

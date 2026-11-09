@@ -79,3 +79,25 @@ def test_background_tick_builds_snapshots_without_requests(tmp_path, monkeypatch
             assert cache._built_at > 0.0
 
     asyncio.run(scenario())
+
+
+def test_wall_mode_endpoint_switches_and_rejects_invalid(tmp_path, monkeypatch) -> None:
+    hub = _prepared_hub(tmp_path, monkeypatch)
+    other = "magnet" if hub.wall_mode == "barrier" else "barrier"
+
+    async def scenario() -> None:
+        app = create_app(hub)
+        async with TestClient(TestServer(app)) as client:
+            response = await client.post("/api/wall-mode", json={"mode": other})
+            assert response.status == 200
+            body = await response.json()
+            assert body == {"ok": True, "wall_mode": other, "wall_mode_alt": hub.wall_mode_alt}
+
+            snapshot = await (await client.get("/api/snapshot")).json()
+            assert snapshot["model"]["wall_mode"] == other
+
+            bad = await client.post("/api/wall-mode", json={"mode": "sideways"})
+            assert bad.status == 400
+            assert (await bad.json())["ok"] is False
+
+    asyncio.run(scenario())

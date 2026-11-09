@@ -3,6 +3,8 @@
 import json
 import time
 
+import pytest
+
 from server import config
 from server.hub import MarketHub
 
@@ -108,3 +110,24 @@ def test_wall_mode_switch_sets_active_and_shadow(tmp_path, monkeypatch) -> None:
     data = snapshot["symbols"]["BTCUSDT"]
     assert data["accuracy"]["wall_mode"] == "magnet"
     assert data["accuracy_alt"]["wall_mode"] == "barrier"
+
+
+def test_set_wall_mode_swaps_ledgers_and_persists(tmp_path, monkeypatch) -> None:
+    hub = _hub(tmp_path, monkeypatch)
+    other = "magnet" if hub.wall_mode == "barrier" else "barrier"
+    active_before = hub.states["BTCUSDT"].ledger
+    shadow_before = hub.states["BTCUSDT"].shadow_ledger
+
+    hub.set_wall_mode(other)
+    assert hub.wall_mode == other
+    assert hub.wall_mode_alt != other
+    assert hub.states["BTCUSDT"].ledger is shadow_before
+    assert hub.states["BTCUSDT"].shadow_ledger is active_before
+    assert (hub.data_dir / "wall_mode.txt").read_text(encoding="utf-8").strip() == other
+    assert hub.snapshot()["model"]["wall_mode"] == other
+
+    hub.set_wall_mode(other)
+    assert hub.states["BTCUSDT"].ledger is shadow_before
+
+    with pytest.raises(ValueError):
+        hub.set_wall_mode("sideways")

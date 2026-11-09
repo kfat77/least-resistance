@@ -63,6 +63,18 @@ class App {
       this.actionToastUntil = Date.now() + 2200;
       this.toast(message, toneName || 'muted', 2200);
     };
+    window.__setWallMode = async (mode) => {
+      if (this.isMock) throw new Error('mock snapshot is read-only');
+      const res = await fetch('/api/wall-mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.ok) throw new Error(data.error || 'wall mode switch failed');
+      this.toast(`墙模式已切换 · ${mode === 'magnet' ? '磁铁' : '障碍'}`, 'amber', 2400);
+      return data;
+    };
     this.tickClock();
     setInterval(() => this.tickClock(), 300);
     setInterval(() => this.tickMeta(), 400);

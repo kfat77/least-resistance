@@ -108,8 +108,13 @@ K 线每 45s 刷新；④ 交易所返回 418/429 时按 `Retry-After` 暂停全
 服务端每 2 秒在后台生成一次快照推进账本（`LEDGER_TICK_S`），所以没有人打开页面时
 A/B 仍会积累样本；静态站则由浏览器内的 Worker 每 900ms 推进。
 
-- 切换：`python run.py --mode live --wall-mode magnet`，或设置环境变量
-  `WALL_MODE=magnet`（仅接受 `barrier` / `magnet`，非法值启动即报错）。
+- 页面切换：顶栏 **「墙模式 WALL」** 分段控件（障碍 BARRIER / 磁铁 MAGNET），
+  点击即时切换并高亮当前模式；旁边徽标显示影子账本正在记录的另一模式。本地站
+  通过 `POST /api/wall-mode` 切换并持久化到 `data/<mode>/wall_mode.txt`；静态站
+  在 Worker 内切换，选择记在浏览器 `localStorage`。
+- 启动默认值：`python run.py --mode live --wall-mode magnet`，或设置环境变量
+  `WALL_MODE=magnet`（仅接受 `barrier` / `magnet`，非法值启动即报错）。显式环境
+  变量优先于页面上次选择。
 - 对比：`python scripts/compare_wall_modes.py --url http://127.0.0.1:8765/api/snapshot`。
 - 决策规则：两种模式各累计至少 20 条已结算窗口（Brier 按全部已结算窗口计算，
   方向命中率作为辅助指标）；若一方 Brier 至少低 0.02 且命中率不更差，则采用该模式
