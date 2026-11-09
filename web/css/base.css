@@ -317,7 +317,7 @@ body.is-stale .bg-fx {
   gap: 2px;
   height: 30px;
   padding: 3px 4px 3px 10px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(240, 185, 11, 0.26);
   border-radius: var(--r-sm);
   background: var(--bg-2);
   flex: 0 0 auto;
@@ -325,9 +325,9 @@ body.is-stale .bg-fx {
 
 .ws-label {
   margin-right: 3px;
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 0.08em;
-  color: var(--ink-4);
+  color: var(--ink-3);
   white-space: nowrap;
 }
 
